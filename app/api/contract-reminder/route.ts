@@ -39,7 +39,7 @@ export async function GET(){
     .select("*")
     .eq("status","active")
 
-    console.log("CONTRACTS:", contracts)
+   console.log("CRON RUN:", new Date());
 
   if(!contracts) return NextResponse.json({ok:true})
 
