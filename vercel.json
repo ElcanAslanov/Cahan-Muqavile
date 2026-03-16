@@ -1,8 +1,8 @@
 {
-  "cron": [
+  "crons": [
     {
       "path": "/api/contract-reminder",
-      "schedule": "0 * * * *"
+      "schedule": "*/5 * * * *"
     }
   ]
 }
