@@ -1,98 +1,84 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@supabase/supabase-js"
+import { sendEmail } from "@/lib/sendEmail"
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
-import { sendEmail } from "@/lib/sendEmail"
 
-function daysLeft(end:string){
-
+function daysLeft(end: string) {
   const today = new Date()
-
   const endDate = new Date(end)
 
-  today.setHours(0,0,0,0)
-  endDate.setHours(0,0,0,0)
+  today.setHours(0, 0, 0, 0)
+  endDate.setHours(0, 0, 0, 0)
 
   const diff = endDate.getTime() - today.getTime()
-
-  return Math.ceil(diff / (1000*60*60*24))
-
-}
-function monthsBetween(start:string,end:string){
-
-  const s = new Date(start)
-  const e = new Date(end)
-
-  return (
-    (e.getFullYear() - s.getFullYear()) * 12 +
-    (e.getMonth() - s.getMonth())
-  )
+  return Math.round(diff / (1000 * 60 * 60 * 24))
 }
 
-export async function GET(){
+export async function GET() {
+  console.log("CRON RUN:", new Date())
 
-  const { data:contracts } = await supabase
+  const { data: contracts, error } = await supabase
     .from("contracts")
     .select("*")
-    .eq("status","active")
+    .ilike("status", "active") // case problemi aradan qalxdı
 
-   console.log("CRON RUN:", new Date());
+  if (error) {
+    console.log("FETCH ERROR:", error)
+    return NextResponse.json({ ok: false })
+  }
 
-  if(!contracts) return NextResponse.json({ok:true})
+  if (!contracts || contracts.length === 0) {
+    console.log("NO CONTRACTS FOUND")
+    return NextResponse.json({ ok: true })
+  }
 
-  for(const contract of contracts){
-
+  for (const contract of contracts) {
     const days = daysLeft(contract.end_date)
 
-    const duration = monthsBetween(
-      contract.start_date,
-      contract.end_date
-    )
+    let type: string | null = null
 
-    let type = null
+    // 🔥 DÜZGÜN RANGE (timezone problemi fix)
+    if (days >= 28 && days <= 30) type = "30_days"
+    else if (days >= 13 && days <= 15) type = "15_days"
+    else if (days >= 0 && days <= 1) type = "1_day"
 
-    // if(duration > 6){
+    console.log("CHECK:", {
+      id: contract.id,
+      end: contract.end_date,
+      days,
+      type
+    })
 
-    //   if(days === 30) type = "30_days"
+    if (!type) continue
 
-    //   if(days === 1) type = "1_day"
-
-    // }else{
-
-    //   if(days === 15) type = "15_days"
-
-    //   if(days === 1) type = "1_day"
-
-    // }
-if(days <= 30 && days >= 28) type = "30_days"
-if(days <= 15 && days >= 13) type = "15_days"
-if(days <= 1 && days >= 0) type = "1_day"
-console.log("CHECK:", {
-  end: contract.end_date,
-  days
-})
-
-    if(!type) continue
-
-    const { data:already } = await supabase
+    const { data: already } = await supabase
       .from("contract_notifications")
       .select("id")
-      .eq("contract_id",contract.id)
-      .eq("type",type)
+      .eq("contract_id", contract.id)
+      .eq("type", type)
       .maybeSingle()
 
-    if(already) continue
+    if (already) {
+      console.log("ALREADY SENT:", contract.id, type)
+      continue
+    }
 
-    const { data:user } = await supabase
+    const { data: user } = await supabase
       .from("profiles")
       .select("email")
-      .eq("id",contract.created_by)
+      .eq("id", contract.created_by)
       .single()
 
-    if(!user?.email) continue
+    if (!user?.email) {
+      console.log("NO EMAIL:", contract.id)
+      continue
+    }
+
+    console.log("SENDING MAIL:", user.email, type)
 
     await sendEmail(
       user.email,
@@ -109,12 +95,10 @@ console.log("CHECK:", {
     await supabase
       .from("contract_notifications")
       .insert({
-        contract_id:contract.id,
+        contract_id: contract.id,
         type
       })
-
   }
 
-  return NextResponse.json({ok:true})
-
+  return NextResponse.json({ ok: true })
 }
