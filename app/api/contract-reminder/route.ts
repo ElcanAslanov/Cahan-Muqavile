@@ -24,12 +24,13 @@ export async function GET() {
   const { data: contracts, error } = await supabase
     .from("contracts")
     .select("*")
-    .ilike("status", "active") // case problemi aradan qalxdı
 
   if (error) {
     console.log("FETCH ERROR:", error)
     return NextResponse.json({ ok: false })
   }
+
+  console.log("CONTRACT COUNT:", contracts?.length)
 
   if (!contracts || contracts.length === 0) {
     console.log("NO CONTRACTS FOUND")
@@ -41,13 +42,14 @@ export async function GET() {
 
     let type: string | null = null
 
-    // 🔥 DÜZGÜN RANGE (timezone problemi fix)
+    // 🔥 Stabil logic
     if (days >= 28 && days <= 30) type = "30_days"
     else if (days >= 13 && days <= 15) type = "15_days"
     else if (days >= 0 && days <= 1) type = "1_day"
 
     console.log("CHECK:", {
       id: contract.id,
+      status: contract.status,
       end: contract.end_date,
       days,
       type
