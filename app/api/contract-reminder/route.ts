@@ -67,10 +67,9 @@ export async function GET(){
     //   if(days === 1) type = "1_day"
 
     // }
-if(days === 30 || days === 29) type = "30_days"
-if(days === 15 || days === 14) type = "15_days"
-if(days === 1 || days === 0) type = "1_day"
-
+if(days <= 30 && days >= 28) type = "30_days"
+if(days <= 15 && days >= 13) type = "15_days"
+if(days <= 1 && days >= 0) type = "1_day"
 console.log("CHECK:", {
   end: contract.end_date,
   days
