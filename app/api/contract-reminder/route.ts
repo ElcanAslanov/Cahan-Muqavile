@@ -54,19 +54,27 @@ export async function GET(){
 
     let type = null
 
-    if(duration > 6){
+    // if(duration > 6){
 
-      if(days === 30) type = "30_days"
+    //   if(days === 30) type = "30_days"
 
-      if(days === 1) type = "1_day"
+    //   if(days === 1) type = "1_day"
 
-    }else{
+    // }else{
 
-      if(days === 15) type = "15_days"
+    //   if(days === 15) type = "15_days"
 
-      if(days === 1) type = "1_day"
+    //   if(days === 1) type = "1_day"
 
-    }
+    // }
+if(days === 30 || days === 29) type = "30_days"
+if(days === 15 || days === 14) type = "15_days"
+if(days === 1 || days === 0) type = "1_day"
+
+console.log("CHECK:", {
+  end: contract.end_date,
+  days
+})
 
     if(!type) continue
 
