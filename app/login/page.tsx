@@ -60,19 +60,19 @@ export default function LoginPage() {
     setLoading(false);
   }
 
+  // ✅ BURANI DÜZƏLTDİM
   async function handleForgotPassword() {
     if (!email) {
       alert("Please enter your email first");
       return;
     }
 
-  async function resetPassword() {
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo:
-      process.env.NODE_ENV === "development"
-        ? "http://localhost:3000/app/reset-password"
-        : "https://contract-management-aslanhuseynxanlis-projects.vercel.app/app/reset-password",
-  });
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo:
+        process.env.NODE_ENV === "development"
+          ? "http://localhost:3000/reset-password"
+          : "https://contract-management-aslanhuseynxanlis-projects.vercel.app/reset-password",
+    });
 
     if (error) {
       alert(error.message);
@@ -144,5 +144,4 @@ export default function LoginPage() {
       </form>
     </div>
   );
-}
 }
