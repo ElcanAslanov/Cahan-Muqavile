@@ -9,6 +9,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [menuOpen, setMenuOpen] = useState(false); // 🔥 hamburger state
 
   useEffect(() => {
     checkUser();
@@ -36,7 +37,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       return;
     }
 
-    // 🔴 Əsas hissə — yalnız ADMIN daxil ola bilər
     if (profile.role !== "ADMIN") {
       router.replace("/login");
       return;
@@ -55,21 +55,35 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   return (
     <div>
 
+      {/* NAV */}
       <nav
         style={{
           display: "flex",
-          gap: 20,
+          alignItems: "center",
           padding: 20,
           background: "#9e4646",
-          color: "white"
+          color: "white",
+          position: "relative"
         }}
       >
 
-        <Link href="/admin/dashboard">Dashboard</Link>
-        <Link href="/admin/contracts">Contracts</Link>
-        <Link href="/admin/users">Users</Link>
-        <Link href="/admin/companies">Companies</Link>
+        {/* LEFT MENU (desktop) */}
+        <div className="nav-links">
+          <Link href="/admin/dashboard">Dashboard</Link>
+          <Link href="/admin/contracts">Contracts</Link>
+          <Link href="/admin/users">Users</Link>
+          <Link href="/admin/companies">Companies</Link>
+        </div>
 
+        {/* HAMBURGER (mobile) */}
+        <button
+          onClick={() => setMenuOpen(!menuOpen)}
+          className="hamburger"
+        >
+          ☰
+        </button>
+
+        {/* LOGOUT */}
         <button
           onClick={logout}
           style={{
@@ -84,11 +98,61 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           Logout
         </button>
 
+        {/* MOBILE MENU */}
+        {menuOpen && (
+          <div className="mobile-menu">
+            <Link href="/admin/dashboard" onClick={() => setMenuOpen(false)}>Dashboard</Link>
+            <Link href="/admin/contracts" onClick={() => setMenuOpen(false)}>Contracts</Link>
+            <Link href="/admin/users" onClick={() => setMenuOpen(false)}>Users</Link>
+            <Link href="/admin/companies" onClick={() => setMenuOpen(false)}>Companies</Link>
+          </div>
+        )}
+
       </nav>
 
-      <div style={{ padding: 40 }}>
+      <div >
         {children}
       </div>
+
+      {/* STYLE */}
+      <style jsx>{`
+        .nav-links {
+          display: flex;
+          gap: 20px;
+        }
+
+        .hamburger {
+          display: none;
+          font-size: 24px;
+          background: none;
+          border: none;
+          color: white;
+          cursor: pointer;
+          margin-left: 10px;
+        }
+
+        .mobile-menu {
+          position: absolute;
+          top: 60px;
+          left: 0;
+          width: 100%;
+          background: #7a3333;
+          display: flex;
+          flex-direction: column;
+          padding: 15px;
+          gap: 10px;
+        }
+
+        @media (max-width: 768px) {
+          .nav-links {
+            display: none;
+          }
+
+          .hamburger {
+            display: block;
+          }
+        }
+      `}</style>
 
     </div>
   );

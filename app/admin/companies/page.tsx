@@ -7,7 +7,6 @@ export default function CompaniesPage() {
   const [companies, setCompanies] = useState<any[]>([]);
   const [name, setName] = useState("");
 
-  // Companies yüklə
   async function loadCompanies() {
     const { data, error } = await supabase
       .from("companies")
@@ -22,7 +21,6 @@ export default function CompaniesPage() {
     if (data) setCompanies(data);
   }
 
-  // Company əlavə et
   async function addCompany() {
     if (!name.trim()) return;
 
@@ -39,7 +37,6 @@ export default function CompaniesPage() {
     loadCompanies();
   }
 
-  // Company sil
   async function deleteCompany(id: string) {
     const confirmDelete = confirm("Bu şirkəti silmək istəyirsiniz?");
     if (!confirmDelete) return;
@@ -59,36 +56,44 @@ export default function CompaniesPage() {
   }, []);
 
   return (
-    <div style={{ padding: 40 }}>
-      <h1>Companies</h1>
+    <div className="min-h-screen bg-gray-900 text-white p-6">
+      <h1 className="text-2xl font-bold mb-6">Companies</h1>
 
-      <div style={{ marginBottom: 20 }}>
+      {/* Add Company */}
+      <div className="bg-white/5 p-4 rounded-xl mb-6 flex flex-col sm:flex-row gap-3 max-w-xl">
         <input
           placeholder="Company name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          style={{ padding: 8, marginRight: 10 }}
+          className="flex-1 p-2 rounded bg-gray-800"
         />
 
-        <button onClick={addCompany} style={{ padding: "8px 16px" }}>
+        <button
+          onClick={addCompany}
+          className="bg-blue-600 px-4 py-2 rounded w-full sm:w-auto"
+        >
           Add
         </button>
       </div>
 
-      <ul>
+      {/* List */}
+      <div className="grid gap-3 max-w-xl">
         {companies.map((c) => (
-          <li key={c.id} style={{ marginBottom: 10 }}>
-            {c.name}
+          <div
+            key={c.id}
+            className="bg-white/5 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center"
+          >
+            <div className="font-medium">{c.name}</div>
 
             <button
-              style={{ marginLeft: 10 }}
               onClick={() => deleteCompany(c.id)}
+              className="mt-3 sm:mt-0 bg-red-600 px-3 py-1 rounded"
             >
               Delete
             </button>
-          </li>
+          </div>
         ))}
-      </ul>
+      </div>
     </div>
   );
 }
