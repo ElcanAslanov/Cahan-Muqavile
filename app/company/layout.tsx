@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 
+
 export default function CompanyLayout({
   children,
 }: {
@@ -118,9 +119,10 @@ export default function CompanyLayout({
           >
             ☰
           </button>
+          
 
         )}
-
+<Link href="/company/settings">⚙️ Settings</Link>
         {!isMobile && (
 
           <div style={{display:"flex",gap:10}}>
