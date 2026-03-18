@@ -111,14 +111,25 @@ export default function ContractsPage() {
     loadContracts();
   }
 
-  async function deleteContract(id: string) {
-    const confirmDelete = confirm("Bu muqavile tam silinsin?");
-    if (!confirmDelete) return;
+ async function deleteContract(id: string) {
+  const confirmDelete = confirm("Bu muqavile tam silinsin?");
+  if (!confirmDelete) return;
 
-    await supabase.from("contracts").delete().eq("id", id);
+  const { error } = await supabase
+    .from("contracts")
+    .delete()
+    .eq("id", id);
 
-    loadContracts();
+  if (error) {
+    alert("Delete error: " + error.message);
+    console.log("DELETE ERROR:", error);
+    return;
   }
+
+  console.log("DELETED:", id);
+
+  loadContracts();
+}
 
   function resetForm() {
     setCounterparty("");
