@@ -66,9 +66,13 @@ export default function LoginPage() {
       return;
     }
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
+  async function resetPassword() {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo:
+      process.env.NODE_ENV === "development"
+        ? "http://localhost:3000/app/reset-password"
+        : "https://contract-management-aslanhuseynxanlis-projects.vercel.app/app/reset-password",
+  });
 
     if (error) {
       alert(error.message);
