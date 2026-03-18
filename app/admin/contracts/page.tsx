@@ -126,8 +126,6 @@ export default function ContractsPage() {
     return;
   }
 
-  console.log("DELETED:", id);
-
   loadContracts();
 }
 
