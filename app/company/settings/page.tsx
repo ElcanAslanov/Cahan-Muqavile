@@ -1,62 +1,30 @@
 "use client";
 
-import { useState } from "react";
-import { supabase } from "@/lib/supabase";
-import { validatePassword } from "@/lib/password";
+import Link from "next/link";
 
-export default function SettingsPage() {
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  async function handleChangePassword() {
-    if (!password) {
-      alert("Password daxil edin");
-      return;
-    }
-
-    const errorMsg = validatePassword(password);
-    if (errorMsg) {
-      alert(errorMsg);
-      return;
-    }
-
-    setLoading(true);
-
-    const { error } = await supabase.auth.updateUser({
-      password,
-    });
-
-    setLoading(false);
-
-    if (error) {
-      alert(error.message);
-      return;
-    }
-
-    alert("Password dəyişdirildi");
-    setPassword("");
-  }
-
+export default function CompanySettingsPage() {
   return (
     <div className="min-h-screen bg-gray-900 text-white p-6">
-      <div className="max-w-md mx-auto bg-white/5 p-6 rounded-xl space-y-4">
-        <h2 className="text-xl font-semibold">Settings</h2>
+      <div className="max-w-2xl mx-auto">
+        <h1 className="text-2xl font-bold mb-6">Settings</h1>
 
-        <input
-          type="password"
-          placeholder="New password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="w-full p-3 rounded bg-gray-800"
-        />
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-5">
+          <h2 className="text-lg font-semibold mb-4">Security</h2>
 
-        <button
-          onClick={handleChangePassword}
-          disabled={loading}
-          className="w-full bg-green-600 py-2 rounded"
-        >
-          {loading ? "Saving..." : "Change Password"}
-        </button>
+          <Link
+            href="/company/settings/password"
+            className="flex items-center justify-between rounded-xl bg-gray-800 hover:bg-gray-700 transition px-4 py-4"
+          >
+            <div>
+              <div className="font-medium">Change Password</div>
+              <div className="text-sm text-gray-400">
+                Update your account password securely
+              </div>
+            </div>
+
+            <span className="text-gray-300">›</span>
+          </Link>
+        </div>
       </div>
     </div>
   );
