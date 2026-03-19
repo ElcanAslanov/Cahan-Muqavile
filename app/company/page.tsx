@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import * as XLSX from "xlsx";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 type Contract = {
   id: string;
@@ -18,6 +21,9 @@ export default function CompanyDashboard() {
   const [loading, setLoading] = useState(true);
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  
+  // SIRALAMA UCUN STATE
+  const [sortConfig, setSortConfig] = useState<{key: keyof Contract | null, direction: 'asc' | 'desc'}>({ key: null, direction: 'asc' });
 
   async function loadContracts() {
     const { data: userData } = await supabase.auth.getUser();
@@ -92,21 +98,61 @@ export default function CompanyDashboard() {
     return Math.floor(diff / (1000 * 60 * 60 * 24));
   }
 
-  function expiryBadge(days: number) {
-    if (days <= 7) return <span style={dangerBadge}>7 DAYS</span>;
-    if (days <= 30) return <span style={warningBadge}>30 DAYS</span>;
-    return <span style={safeBadge}>ACTIVE</span>;
-  }
+  // --- EXPORT FUNKSIYALARI ---
+  const exportToExcel = () => {
+    const dataToExport = sortedAndFilteredContracts.map(c => ({
+      "Şirkət": c.company_name,
+      "Kontragent": c.counterparty,
+      "Başlama": formatDate(c.start_date),
+      "Bitmə": formatDate(c.end_date),
+      "Yenilənmə": c.auto_renew ? "Bəli" : "Xeyr"
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Contracts");
+    XLSX.writeFile(workbook, "Sirket_Muqavileleri.xlsx");
+  };
+
+  const exportToPDF = () => {
+    const doc = new jsPDF();
+    const tableColumn = ["Company", "Counterparty", "Start", "End", "Renew"];
+    const tableRows = sortedAndFilteredContracts.map(c => [
+      c.company_name, c.counterparty, formatDate(c.start_date), formatDate(c.end_date), c.auto_renew ? "Yes" : "No"
+    ]);
+    autoTable(doc, { head: [tableColumn], body: tableRows, startY: 20 });
+    doc.save("Sirket_Muqavileleri.pdf");
+  };
 
   const companies = [...new Set(contracts.map((c) => c.company_name))];
 
-  const filteredContracts = contracts
-    .filter((c) => !selectedCompany || c.company_name === selectedCompany)
-    .filter(
-      (c) =>
+  // FILTRLEME VE SIRALAMA MENTIQI
+  const sortedAndFilteredContracts = useMemo(() => {
+    let result = contracts
+      .filter((c) => !selectedCompany || c.company_name === selectedCompany)
+      .filter((c) =>
         c.counterparty.toLowerCase().includes(search.toLowerCase()) ||
         c.company_name.toLowerCase().includes(search.toLowerCase())
-    );
+      );
+
+    if (sortConfig.key) {
+      result.sort((a, b) => {
+        const aVal = a[sortConfig.key!] || "";
+        const bVal = b[sortConfig.key!] || "";
+        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+    return result;
+  }, [contracts, selectedCompany, search, sortConfig]);
+
+  const requestSort = (key: keyof Contract) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
 
   if (loading) {
     return <div style={{ padding: 30, color: "white" }}>Loading...</div>;
@@ -115,8 +161,18 @@ export default function CompanyDashboard() {
   return (
     <div style={pageStyle} onClick={() => setSelectedCompany(null)}>
       <div style={headerWrap}>
-        <h1 style={titleStyle}>Company Contracts</h1>
-        <p style={subtitleStyle}>Manage active contracts for your companies</p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "20px" }}>
+          <div>
+            <h1 style={titleStyle}>Company Contracts</h1>
+            <p style={subtitleStyle}>Manage active contracts for your companies</p>
+          </div>
+          
+          {/* EXPORT BUTONLARI */}
+          <div style={{ display: "flex", gap: "10px" }}>
+            <button onClick={(e) => { e.stopPropagation(); exportToExcel(); }} style={excelBtnStyle}>Excel</button>
+            <button onClick={(e) => { e.stopPropagation(); exportToPDF(); }} style={pdfExportBtnStyle}>PDF</button>
+          </div>
+        </div>
       </div>
 
       <div style={{ marginBottom: 24 }}>
@@ -155,28 +211,27 @@ export default function CompanyDashboard() {
         </div>
       )}
 
-      {filteredContracts.length === 0 ? (
+      {sortedAndFilteredContracts.length === 0 ? (
         <div style={emptyCard}>
           <p style={{ margin: 0, color: "#cbd5e1" }}>No contracts found</p>
         </div>
       ) : (
         <>
-          {/* DESKTOP TABLE VIEW */}
           <div className="desktop-table" style={tableWrap}>
             <table style={tableStyle}>
               <thead>
                 <tr style={{ borderBottom: "1px solid #334155" }}>
-                  <th style={thStyle}>Company</th>
-                  <th style={thStyle}>Counterparty</th>
-                  <th style={thStyle}>Start Date</th>
-                  <th style={thStyle}>End Date</th>
+                  <th style={{...thStyle, cursor: "pointer"}} onClick={() => requestSort("company_name")}>Company ↕</th>
+                  <th style={{...thStyle, cursor: "pointer"}} onClick={() => requestSort("counterparty")}>Counterparty ↕</th>
+                  <th style={{...thStyle, cursor: "pointer"}} onClick={() => requestSort("start_date")}>Start Date ↕</th>
+                  <th style={{...thStyle, cursor: "pointer"}} onClick={() => requestSort("end_date")}>End Date ↕</th>
                   <th style={thStyle}>Status</th>
                   <th style={thStyle}>Renewal</th>
                   <th style={thStyle}>Document</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredContracts.map((c) => {
+                {sortedAndFilteredContracts.map((c) => {
                   const days = daysLeft(c.end_date);
                   return (
                     <tr key={c.id} style={rowStyle}>
@@ -206,9 +261,8 @@ export default function CompanyDashboard() {
             </table>
           </div>
 
-          {/* MOBILE CARD VIEW */}
           <div className="mobile-cards" style={mobileGrid}>
-            {filteredContracts.map((c) => {
+            {sortedAndFilteredContracts.map((c) => {
               const days = daysLeft(c.end_date);
               return (
                 <div key={c.id} style={mobileContractCard}>
@@ -261,6 +315,13 @@ export default function CompanyDashboard() {
   );
 }
 
+// Sənin köhnə funksiyaların və nişanların (status badge)
+function expiryBadge(days: number) {
+  if (days <= 7) return <span style={dangerBadge}>7 DAYS</span>;
+  if (days <= 30) return <span style={warningBadge}>30 DAYS</span>;
+  return <span style={safeBadge}>ACTIVE</span>;
+}
+
 /* STYLES */
 const pageStyle = { minHeight: "100vh", padding: "30px 20px", background: "linear-gradient(180deg,#0f172a,#1e293b)", color: "white" };
 const headerWrap = { marginBottom: "30px" };
@@ -269,25 +330,24 @@ const subtitleStyle = { marginTop: "6px", color: "#94a3b8", fontSize: "14px" };
 const searchInputStyle = { width: "100%", maxWidth: "400px", padding: "12px 16px", borderRadius: "10px", border: "1px solid #334155", background: "#0f172a", color: "white", outline: "none" };
 const companyGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "16px", marginBottom: "32px" };
 const companyCardBase = { padding: "16px", borderRadius: "14px", cursor: "pointer", transition: "0.3s" };
-
 const tableWrap = { background: "#0f172a", border: "1px solid #334155", borderRadius: "16px", overflow: "hidden" };
 const tableStyle = { width: "100%", borderCollapse: "collapse" as const };
 const thStyle = { textAlign: "left" as const, padding: "16px", color: "#94a3b8", fontSize: "12px", textTransform: "uppercase" as const };
 const tdStyle = { padding: "16px", fontSize: "14px", borderBottom: "1px solid #1e293b" };
 const rowStyle = { transition: "0.2s" };
-
-/* MOBILE SPECIFIC STYLES */
 const mobileGrid = { gap: "16px", gridTemplateColumns: "1fr" };
 const mobileContractCard = { background: "#0f172a", border: "1px solid #334155", borderRadius: "16px", padding: "16px" };
 const mobileInfoRow = { display: "flex", gap: "20px", marginTop: "10px" };
 const mobileLabel = { fontSize: "11px", color: "#94a3b8", margin: 0 };
 const mobileValue = { fontSize: "13px", color: "white", margin: "2px 0 0 0", fontWeight: 500 };
-
-/* BADGES & BUTTONS */
 const renewBadge = { background: "#059669", padding: "4px 10px", borderRadius: "20px", fontSize: "11px", color: "white" };
 const noRenewBadge = { background: "#475569", padding: "4px 10px", borderRadius: "20px", fontSize: "11px", color: "#cbd5e1" };
 const safeBadge = { background: "#2563eb", padding: "4px 10px", borderRadius: "20px", fontSize: "11px", fontWeight: 600 };
 const warningBadge = { background: "#d97706", padding: "4px 10px", borderRadius: "20px", fontSize: "11px", fontWeight: 600 };
 const dangerBadge = { background: "#dc2626", padding: "4px 10px", borderRadius: "20px", fontSize: "11px", fontWeight: 600 };
 const pdfBtn = { background: "#3b82f6", color: "white", padding: "8px 14px", borderRadius: "8px", textDecoration: "none", fontSize: "12px" };
-const emptyCard = { background: "#1e293b", padding: "40px", borderRadius: "16px", textAlign: "center" as const };
+const emptyCard = { background: "#1e293b", padding: "40px", borderRadius: "16px", textAlign: "center" as const }; 
+
+// EXPORT DÜYMƏLƏRİ ÜÇÜN STİLLƏR (Arxa fonlu)
+const excelBtnStyle = { background: "#107c41", color: "white", padding: "8px 16px", borderRadius: "8px", border: "none", cursor: "pointer", fontSize: "13px", fontWeight: 600, boxShadow: "0 4px 10px rgba(0,0,0,0.2)" };
+const pdfExportBtnStyle = { background: "#e11d48", color: "white", padding: "8px 16px", borderRadius: "8px", border: "none", cursor: "pointer", fontSize: "13px", fontWeight: 600, boxShadow: "0 4px 10px rgba(0,0,0,0.2)" };
