@@ -37,59 +37,60 @@ export default function UsersPage() {
     );
   }
 
-async function addUser() {
-  if (!name || !email || !password) {
-    alert("Butun fieldleri doldurun");
-    return;
+  async function addUser() {
+    if (!name || !email || !password) {
+      alert("Butun fieldleri doldurun");
+      return;
+    }
+
+    const errorMsg = validatePassword(password);
+    if (errorMsg) {
+      alert(errorMsg);
+      return;
+    }
+
+    if (
+      (role === "COMPANY_MANAGER" || role === "ACCOUNTANT") &&
+      selectedCompanies.length === 0
+    ) {
+      alert("Bu rol ucun en azi 1 sirket secin");
+      return;
+    }
+
+    const res = await fetch("/api/create-user", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email,
+        password,
+        full_name: name,
+        role,
+        company_ids:
+          role === "COMPANY_MANAGER" || role === "ACCOUNTANT"
+            ? selectedCompanies
+            : [],
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || data.error) {
+      alert(data.error || "User create error");
+      return;
+    }
+
+    alert("User created");
+
+    setName("");
+    setEmail("");
+    setPassword("");
+    setRole("COMPANY_MANAGER");
+    setSelectedCompanies([]);
+
+    loadUsers();
   }
-
-  const errorMsg = validatePassword(password);
-  if (errorMsg) {
-    alert(errorMsg);
-    return;
-  }
-
-  console.log("ADD USER CLICKED");
-
-  if (role === "COMPANY_MANAGER" && selectedCompanies.length === 0) {
-    alert("Company manager ucun en azi 1 sirket secin");
-    return;
-  }
-
-  const res = await fetch("/api/create-user", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      email,
-      password,
-      full_name: name,
-      role,
-      company_ids: role === "COMPANY_MANAGER" ? selectedCompanies : [],
-    }),
-  });
-
-  const data = await res.json();
-
-  console.log("CREATE RESULT:", data);
-
-  if (!res.ok || data.error) {
-    alert(data.error || "User create error");
-    return;
-  }
-
-  alert("User created");
-
-  // reset form
-  setName("");
-  setEmail("");
-  setPassword("");
-  setRole("COMPANY_MANAGER");
-  setSelectedCompanies([]);
-
-  loadUsers();
-}
 
   async function deleteUser(id: string) {
     if (!confirm("Delete user?")) return;
@@ -99,8 +100,6 @@ async function addUser() {
   }
 
   async function changePassword() {
-    console.log("CHANGE CLICKED", selectedUser, newPassword);
-
     if (!selectedUser || !newPassword) {
       alert("Select user and enter password");
       return;
@@ -113,8 +112,6 @@ async function addUser() {
     });
 
     const data = await res.json();
-
-    console.log("CHANGE RESULT:", data);
 
     if (!res.ok) {
       alert(data.error);
@@ -163,7 +160,10 @@ async function addUser() {
           value={role}
           onChange={(e) => {
             setRole(e.target.value);
-            if (e.target.value !== "COMPANY_MANAGER") {
+            if (
+              e.target.value !== "COMPANY_MANAGER" &&
+              e.target.value !== "ACCOUNTANT"
+            ) {
               setSelectedCompanies([]);
             }
           }}
@@ -172,9 +172,10 @@ async function addUser() {
           <option value="ADMIN">ADMIN</option>
           <option value="COMPANY_MANAGER">COMPANY_MANAGER</option>
           <option value="HOLDING_MANAGER">HOLDING_MANAGER</option>
+          <option value="ACCOUNTANT">ACCOUNTANT</option>
         </select>
 
-        {role === "COMPANY_MANAGER" && (
+        {(role === "COMPANY_MANAGER" || role === "ACCOUNTANT") && (
           <div>
             <div className="text-sm mb-1">Select Companies</div>
             {companies.map((c) => (

@@ -16,12 +16,6 @@ export async function POST(req: Request) {
       full_name,
       role,
       company_ids = [],
-    }: {
-      email: string;
-      password: string;
-      full_name: string;
-      role: string;
-      company_ids?: string[];
     } = body;
 
     if (!email || !password || !full_name || !role) {
@@ -47,6 +41,7 @@ export async function POST(req: Request) {
 
     const userId = authUser.user.id;
 
+    // ✅ PROFILE INSERT
     const { error: profileError } = await supabaseAdmin.from("profiles").insert({
       id: userId,
       email,
@@ -61,8 +56,12 @@ export async function POST(req: Request) {
       );
     }
 
-    if (role === "COMPANY_MANAGER" && company_ids.length > 0) {
-      const rows = company_ids.map((companyId) => ({
+    // 🔥 ƏSAS DÜZƏLİŞ BURDA
+    if (
+      (role === "COMPANY_MANAGER" || role === "ACCOUNTANT") &&
+      company_ids.length > 0
+    ) {
+      const rows = company_ids.map((companyId: string) => ({
         user_id: userId,
         company_id: companyId,
       }));

@@ -42,6 +42,7 @@ export default function LoginPage() {
       return;
     }
 
+    // ✅ ROLE ROUTING
     if (profile.role === "ADMIN") {
       router.push("/admin/dashboard");
       return;
@@ -57,22 +58,26 @@ export default function LoginPage() {
       return;
     }
 
+    if (profile.role === "ACCOUNTANT") {
+      router.push("/accountant");
+      return;
+    }
+
     setLoading(false);
   }
 
-  // ✅ BURANI DÜZƏLTDİM
   async function handleForgotPassword() {
     if (!email) {
       alert("Please enter your email first");
       return;
     }
 
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
-  redirectTo:
-    process.env.NODE_ENV === "development"
-      ? "http://localhost:3000/reset-password"
-      : "https://contract-management-aslanhuseynxanlis-projects.vercel.app/reset-password",
-});
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo:
+        process.env.NODE_ENV === "development"
+          ? "http://localhost:3000/reset-password"
+          : "https://your-netlify-domain.netlify.app/reset-password",
+    });
 
     if (error) {
       alert(error.message);
