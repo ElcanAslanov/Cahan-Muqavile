@@ -16,6 +16,7 @@ export async function POST(req: Request) {
       full_name,
       role,
       company_ids = [],
+      permissions = [], // 🔥 YENİ
     } = body;
 
     if (!email || !password || !full_name || !role) {
@@ -25,6 +26,7 @@ export async function POST(req: Request) {
       );
     }
 
+    // ✅ AUTH USER
     const { data: authUser, error: authError } =
       await supabaseAdmin.auth.admin.createUser({
         email,
@@ -41,7 +43,7 @@ export async function POST(req: Request) {
 
     const userId = authUser.user.id;
 
-    // ✅ PROFILE INSERT
+    // ✅ PROFILE
     const { error: profileError } = await supabaseAdmin.from("profiles").insert({
       id: userId,
       email,
@@ -56,7 +58,9 @@ export async function POST(req: Request) {
       );
     }
 
-    // 🔥 ƏSAS DÜZƏLİŞ BURDA
+    // =========================
+    // 🔵 OLD SYSTEM (company_ids)
+    // =========================
     if (
       (role === "COMPANY_MANAGER" || role === "ACCOUNTANT") &&
       company_ids.length > 0
@@ -66,13 +70,38 @@ export async function POST(req: Request) {
         company_id: companyId,
       }));
 
-      const { error: userCompaniesError } = await supabaseAdmin
+      const { error } = await supabaseAdmin
         .from("user_companies")
         .insert(rows);
 
-      if (userCompaniesError) {
+      if (error) {
         return NextResponse.json(
-          { error: userCompaniesError.message },
+          { error: error.message },
+          { status: 400 }
+        );
+      }
+    }
+
+    // =========================
+    // 🔥 NEW SYSTEM (permissions)
+    // =========================
+    if (permissions.length > 0) {
+      const rows = permissions.map((p: any) => ({
+        user_id: userId,
+        company_id: p.company_id,
+        can_view: p.can_view || false,
+        can_create: p.can_create || false,
+        can_delete: p.can_delete || false,
+        can_archive: p.can_archive || false,
+      }));
+
+      const { error } = await supabaseAdmin
+        .from("user_company_permissions")
+        .insert(rows);
+
+      if (error) {
+        return NextResponse.json(
+          { error: error.message },
           { status: 400 }
         );
       }
