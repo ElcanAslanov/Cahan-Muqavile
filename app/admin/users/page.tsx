@@ -182,14 +182,14 @@ export default function UsersPage() {
           placeholder="Full name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="w-full p-2 rounded bg-gray-800"
+          className="w-full p-2 rounded text-white bg-gray-800"
         />
 
         <input
           placeholder="Email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="w-full p-2 rounded bg-gray-800"
+          className="w-full p-2 text-white rounded bg-gray-800"
         />
 
         <input
@@ -197,7 +197,7 @@ export default function UsersPage() {
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="w-full p-2 rounded bg-gray-800"
+          className="w-full text-white p-2 rounded bg-gray-800"
         />
 
         <select
