@@ -9,6 +9,7 @@ import autoTable from "jspdf-autotable";
 type Contract = {
   id: string;
   company_name: string;
+  company_id: string;
   counterparty: string;
   start_date: string;
   end_date: string;
@@ -21,13 +22,21 @@ export default function CompanyDashboard() {
   const [loading, setLoading] = useState(true);
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  
+  const [permissions, setPermissions] = useState<any[]>([]);
+
   // SIRALAMA UCUN STATE
-  const [sortConfig, setSortConfig] = useState<{key: keyof Contract | null, direction: 'asc' | 'desc'}>({ key: null, direction: 'asc' });
+  const [sortConfig, setSortConfig] = useState<{ key: keyof Contract | null, direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
 
   async function loadContracts() {
     const { data: userData } = await supabase.auth.getUser();
     const userId = userData.user?.id;
+
+    const { data: perms } = await supabase
+      .from("user_company_permissions")
+      .select("*")
+      .eq("user_id", userId);
+
+    setPermissions(perms || []);
 
     if (!userId) {
       setLoading(false);
@@ -81,7 +90,37 @@ export default function CompanyDashboard() {
   useEffect(() => {
     loadContracts();
   }, []);
+  async function deleteContract(id: string) {
+    if (!confirm("Silmək istədiyinizə əminsiniz?")) return;
 
+    const { error } = await supabase
+      .from("contracts")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      alert("Xəta baş verdi");
+      return;
+    }
+
+    setContracts((prev) => prev.filter((c) => c.id !== id));
+  }
+  async function archiveContract(id: string) {
+    if (!confirm("Arxivə göndərmək istədiyinizə əminsiniz?")) return;
+
+    const { error } = await supabase
+      .from("contracts")
+      .update({ status: "archived" })
+      .eq("id", id);
+
+    if (error) {
+      alert("Xəta baş verdi");
+      return;
+    }
+
+    // UI-dan da sil (çünki active list-də göstərirsən)
+    setContracts((prev) => prev.filter((c) => c.id !== id));
+  }
   function formatDate(dateStr: string) {
     if (!dateStr) return "";
     const date = new Date(dateStr);
@@ -166,7 +205,7 @@ export default function CompanyDashboard() {
             <h1 style={titleStyle}>Company Contracts</h1>
             <p style={subtitleStyle}>Manage active contracts for your companies</p>
           </div>
-          
+
           {/* EXPORT BUTONLARI */}
           <div style={{ display: "flex", gap: "10px" }}>
             <button onClick={(e) => { e.stopPropagation(); exportToExcel(); }} style={excelBtnStyle}>Excel</button>
@@ -221,17 +260,24 @@ export default function CompanyDashboard() {
             <table style={tableStyle}>
               <thead>
                 <tr style={{ borderBottom: "1px solid #334155" }}>
-                  <th style={{...thStyle, cursor: "pointer"}} onClick={() => requestSort("company_name")}>Company ↕</th>
-                  <th style={{...thStyle, cursor: "pointer"}} onClick={() => requestSort("counterparty")}>Counterparty ↕</th>
-                  <th style={{...thStyle, cursor: "pointer"}} onClick={() => requestSort("start_date")}>Start Date ↕</th>
-                  <th style={{...thStyle, cursor: "pointer"}} onClick={() => requestSort("end_date")}>End Date ↕</th>
+                  <th style={{ ...thStyle, cursor: "pointer" }} onClick={() => requestSort("company_name")}>Company ↕</th>
+                  <th style={{ ...thStyle, cursor: "pointer" }} onClick={() => requestSort("counterparty")}>Counterparty ↕</th>
+                  <th style={{ ...thStyle, cursor: "pointer" }} onClick={() => requestSort("start_date")}>Start Date ↕</th>
+                  <th style={{ ...thStyle, cursor: "pointer" }} onClick={() => requestSort("end_date")}>End Date ↕</th>
                   <th style={thStyle}>Status</th>
                   <th style={thStyle}>Renewal</th>
                   <th style={thStyle}>Document</th>
+                  <th style={thStyle}>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {sortedAndFilteredContracts.map((c) => {
+                  const canDelete = permissions.some(
+                    (p) => p.company_id === c.company_id && p.can_delete
+                  );
+                  const canArchive = permissions.some(
+                    (p) => p.company_id === c.company_id && p.can_archive
+                  );
                   const days = daysLeft(c.end_date);
                   return (
                     <tr key={c.id} style={rowStyle}>
@@ -253,6 +299,39 @@ export default function CompanyDashboard() {
                         ) : (
                           <span style={{ color: "#64748b" }}>N/A</span>
                         )}
+
+                      </td>
+                      <td style={tdStyle}>
+                        {canArchive && (
+                          <button
+                            onClick={() => archiveContract(c.id)}
+                            style={{
+                              background: "#f59e0b",
+                              color: "white",
+                              padding: "6px 10px",
+                              borderRadius: "6px",
+                              fontSize: "12px",
+                              marginRight: "6px",
+                            }}
+                          >
+                            Archive
+                          </button>
+                        )}
+
+                        {canDelete && (
+                          <button
+                            onClick={() => deleteContract(c.id)}
+                            style={{
+                              background: "#dc2626",
+                              color: "white",
+                              padding: "6px 10px",
+                              borderRadius: "6px",
+                              fontSize: "12px",
+                            }}
+                          >
+                            Delete
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -271,7 +350,7 @@ export default function CompanyDashboard() {
                     {expiryBadge(days)}
                   </div>
                   <h3 style={{ margin: "0 0 8px 0", fontSize: 16, color: "white" }}>{c.counterparty}</h3>
-                  
+
                   <div style={mobileInfoRow}>
                     <div>
                       <p style={mobileLabel}>Start Date</p>
@@ -285,16 +364,50 @@ export default function CompanyDashboard() {
 
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 15, paddingTop: 15, borderTop: "1px solid #334155" }}>
                     <div>
-                        {c.auto_renew ? (
-                          <span style={renewBadge}>🔄 Auto Renew</span>
-                        ) : (
-                          <span style={noRenewBadge}>⛔ Manual</span>
-                        )}
+                      {c.auto_renew ? (
+                        <span style={renewBadge}>🔄 Auto Renew</span>
+                      ) : (
+                        <span style={noRenewBadge}>⛔ Manual</span>
+                      )}
                     </div>
                     {c.file_url && (
                       <a href={c.file_url} target="_blank" rel="noopener noreferrer" style={pdfBtn}>View PDF</a>
                     )}
                   </div>
+                  {permissions.some(
+                    (p) => p.company_id === c.company_id && p.can_delete
+                  ) && (
+                      <button
+                        onClick={() => deleteContract(c.id)}
+                        style={{
+                          background: "#dc2626",
+                          color: "white",
+                          padding: "6px 10px",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          marginTop: "10px",
+                        }}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  {permissions.some(
+                    (p) => p.company_id === c.company_id && p.can_archive
+                  ) && (
+                      <button
+                        onClick={() => archiveContract(c.id)}
+                        style={{
+                          background: "#f59e0b",
+                          color: "white",
+                          padding: "6px 10px",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          marginTop: "10px",
+                        }}
+                      >
+                        Archive
+                      </button>
+                    )}
                 </div>
               );
             })}
@@ -346,7 +459,7 @@ const safeBadge = { background: "#2563eb", padding: "4px 10px", borderRadius: "2
 const warningBadge = { background: "#d97706", padding: "4px 10px", borderRadius: "20px", fontSize: "11px", fontWeight: 600 };
 const dangerBadge = { background: "#dc2626", padding: "4px 10px", borderRadius: "20px", fontSize: "11px", fontWeight: 600 };
 const pdfBtn = { background: "#3b82f6", color: "white", padding: "8px 14px", borderRadius: "8px", textDecoration: "none", fontSize: "12px" };
-const emptyCard = { background: "#1e293b", padding: "40px", borderRadius: "16px", textAlign: "center" as const }; 
+const emptyCard = { background: "#1e293b", padding: "40px", borderRadius: "16px", textAlign: "center" as const };
 
 // EXPORT DÜYMƏLƏRİ ÜÇÜN STİLLƏR (Arxa fonlu)
 const excelBtnStyle = { background: "#107c41", color: "white", padding: "8px 16px", borderRadius: "8px", border: "none", cursor: "pointer", fontSize: "13px", fontWeight: 600, boxShadow: "0 4px 10px rgba(0,0,0,0.2)" };

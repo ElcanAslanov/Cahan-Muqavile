@@ -28,26 +28,69 @@ export default function AccountantDashboard() {
   }>({ key: null, direction: "asc" });
 
   // 🔥 ACCOUNTANT FILTER (UI-ya toxunmur)
-  async function loadContracts() {
-    const { data: userData } = await supabase.auth.getUser();
-    const userId = userData.user?.id;
+  // 🔥 SADƏCƏ loadContracts dəyişdi, qalanı eyni qalıb
 
-    const { data: userCompanies } = await supabase
-      .from("user_companies")
-      .select("company_id")
-      .eq("user_id", userId);
+async function loadContracts() {
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id;
 
-    const companyIds = userCompanies?.map((c) => c.company_id) || [];
+  if (!userId) return;
 
-    const { data } = await supabase
-      .from("contracts")
-      .select("*")
-      .in("company_id", companyIds)
-      .eq("status", "active")
-      .order("created_at", { ascending: false });
+  // 🔥 ROLE GÖTÜR
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .single();
 
-    if (data) setContracts(data);
+  const role = profile?.role;
+
+  // 🔥 CHECKBOX PERMISSIONS
+  const { data: perms } = await supabase
+    .from("user_company_permissions")
+    .select("*")
+    .eq("user_id", userId);
+
+  let allowedCompanyIds: string[] = [];
+
+  if (perms && perms.length > 0) {
+    // ✅ checkbox varsa → onu istifadə et
+    allowedCompanyIds = perms
+      .filter((p) => p.can_view)
+      .map((p) => p.company_id);
+  } else {
+    // 🔁 fallback → köhnə sistem
+
+    if (role === "HOLDING_MANAGER") {
+      // bütün company-lər
+      const { data: all } = await supabase
+        .from("companies")
+        .select("id");
+
+      allowedCompanyIds = all?.map((c) => c.id) || [];
+    }
+
+    if (role === "COMPANY_MANAGER" || role === "ACCOUNTANT") {
+      const { data: userCompanies } = await supabase
+        .from("user_companies")
+        .select("company_id")
+        .eq("user_id", userId);
+
+      allowedCompanyIds =
+        userCompanies?.map((c) => c.company_id) || [];
+    }
   }
+
+  // 🔥 CONTRACT FETCH
+  const { data } = await supabase
+    .from("contracts")
+    .select("*")
+    .in("company_id", allowedCompanyIds)
+    .eq("status", "active")
+    .order("created_at", { ascending: false });
+
+  if (data) setContracts(data);
+}
 
   useEffect(() => {
     loadContracts();

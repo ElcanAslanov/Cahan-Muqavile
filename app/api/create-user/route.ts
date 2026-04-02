@@ -16,7 +16,7 @@ export async function POST(req: Request) {
       full_name,
       role,
       company_ids = [],
-      permissions = [], // 🔥 YENİ
+      permissions = [],
     } = body;
 
     if (!email || !password || !full_name || !role) {
@@ -86,24 +86,37 @@ export async function POST(req: Request) {
     // 🔥 NEW SYSTEM (permissions)
     // =========================
     if (permissions.length > 0) {
-      const rows = permissions.map((p: any) => ({
-        user_id: userId,
-        company_id: p.company_id,
-        can_view: p.can_view || false,
-        can_create: p.can_create || false,
-        can_delete: p.can_delete || false,
-        can_archive: p.can_archive || false,
-      }));
+      // 🔥 yalnız seçilmiş company-lər
+      const filtered = permissions.filter((p: any) =>
+        company_ids.includes(p.company_id)
+      );
 
-      const { error } = await supabaseAdmin
-        .from("user_company_permissions")
-        .insert(rows);
+      // 🔥 yalnız aktiv permission olanlar
+      const rows = filtered
+        .filter(
+          (p: any) =>
+            p.can_read || p.can_create || p.can_delete || p.can_archive
+        )
+        .map((p: any) => ({
+          user_id: userId,
+          company_id: p.company_id,
+          can_read: p.can_read || false,
+          can_create: p.can_create || false,
+          can_delete: p.can_delete || false,
+          can_archive: p.can_archive || false,
+        }));
 
-      if (error) {
-        return NextResponse.json(
-          { error: error.message },
-          { status: 400 }
-        );
+      if (rows.length > 0) {
+        const { error } = await supabaseAdmin
+          .from("user_company_permissions")
+          .insert(rows);
+
+        if (error) {
+          return NextResponse.json(
+            { error: error.message },
+            { status: 400 }
+          );
+        }
       }
     }
 

@@ -9,6 +9,8 @@ export default function UsersPage() {
   const [companies, setCompanies] = useState<any[]>([]);
   const [selectedCompanies, setSelectedCompanies] = useState<string[]>([]);
 
+  const [permissions, setPermissions] = useState<any[]>([]);
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,13 +30,55 @@ export default function UsersPage() {
 
   async function loadCompanies() {
     const { data } = await supabase.from("companies").select("*");
-    if (data) setCompanies(data);
+
+    if (data) {
+      setCompanies(data);
+
+      const initial = data.map((c) => ({
+        company_id: c.id,
+        can_read: false,
+        can_create: false,
+        can_delete: false,
+        can_archive: false,
+      }));
+
+      setPermissions(initial);
+    }
   }
 
   function toggleCompany(id: string) {
-    setSelectedCompanies((prev) =>
-      prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
-    );
+    setSelectedCompanies((prev) => {
+      const exists = prev.includes(id);
+
+      const updated = exists
+        ? prev.filter((c) => c !== id)
+        : [...prev, id];
+
+      // 🔥 deselect edəndə permission sıfırla
+      if (exists) {
+        setPermissions((perms) =>
+          perms.map((p) =>
+            p.company_id === id
+              ? {
+                  ...p,
+                  can_read: false,
+                  can_create: false,
+                  can_delete: false,
+                  can_archive: false,
+                }
+              : p
+          )
+        );
+      }
+
+      return updated;
+    });
+  }
+
+  function updatePermission(index: number, key: string, value: boolean) {
+    const updated = [...permissions];
+    updated[index][key] = value;
+    setPermissions(updated);
   }
 
   async function addUser() {
@@ -71,6 +115,7 @@ export default function UsersPage() {
           role === "COMPANY_MANAGER" || role === "ACCOUNTANT"
             ? selectedCompanies
             : [],
+        permissions,
       }),
     });
 
@@ -129,10 +174,9 @@ export default function UsersPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6">
+    <div  className="min-h-screen  text-black p-6">
       <h1 className="text-2xl font-bold mb-6">Users</h1>
 
-      {/* Add User */}
       <div className="bg-white/5 p-4 rounded-xl mb-6 space-y-3 max-w-xl">
         <input
           placeholder="Full name"
@@ -167,7 +211,7 @@ export default function UsersPage() {
               setSelectedCompanies([]);
             }
           }}
-          className="w-full p-2 rounded bg-gray-800"
+          className="w-full text-white p-2 rounded bg-gray-800"
         >
           <option value="ADMIN">ADMIN</option>
           <option value="COMPANY_MANAGER">COMPANY_MANAGER</option>
@@ -191,6 +235,86 @@ export default function UsersPage() {
           </div>
         )}
 
+        <div className="mt-4">
+          <div className="text-sm mb-1">Permissions</div>
+
+          <table className="w-full text-sm border border-gray-700">
+            <thead>
+              <tr className="bg-gray-800 text-white">
+                <th className="p-2 text-left">Company</th>
+                <th>View</th>
+                <th>Create</th>
+                <th>Delete</th>
+                <th>Archive</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {companies.map((c, i) => (
+                <tr key={c.id} className="border-t border-gray-700">
+                  <td className="p-2">{c.name}</td>
+
+                  <td>
+                    <input
+                      type="checkbox"
+                      disabled={!selectedCompanies.includes(c.id)}
+                      checked={
+                        selectedCompanies.includes(c.id) &&
+                        permissions[i]?.can_read
+                      }
+                      onChange={(e) =>
+                        updatePermission(i, "can_read", e.target.checked)
+                      }
+                    />
+                  </td>
+
+                  <td>
+                    <input
+                      type="checkbox"
+                      disabled={!selectedCompanies.includes(c.id)}
+                      checked={
+                        selectedCompanies.includes(c.id) &&
+                        permissions[i]?.can_create
+                      }
+                      onChange={(e) =>
+                        updatePermission(i, "can_create", e.target.checked)
+                      }
+                    />
+                  </td>
+
+                  <td>
+                    <input
+                      type="checkbox"
+                      disabled={!selectedCompanies.includes(c.id)}
+                      checked={
+                        selectedCompanies.includes(c.id) &&
+                        permissions[i]?.can_delete
+                      }
+                      onChange={(e) =>
+                        updatePermission(i, "can_delete", e.target.checked)
+                      }
+                    />
+                  </td>
+
+                  <td>
+                    <input
+                      type="checkbox"
+                      disabled={!selectedCompanies.includes(c.id)}
+                      checked={
+                        selectedCompanies.includes(c.id) &&
+                        permissions[i]?.can_archive
+                      }
+                      onChange={(e) =>
+                        updatePermission(i, "can_archive", e.target.checked)
+                      }
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
         <button
           onClick={addUser}
           className="bg-blue-600 px-4 py-2 rounded w-full"
@@ -199,12 +323,11 @@ export default function UsersPage() {
         </button>
       </div>
 
-      {/* Change Password */}
       <div className="bg-white/5 p-4 rounded-xl mb-6 max-w-xl space-y-3">
         <select
           value={selectedUser}
           onChange={(e) => setSelectedUser(e.target.value)}
-          className="w-full p-2 rounded bg-gray-800"
+          className="w-full p-2 rounded bg-gray-800 text-white"
         >
           <option value="">Select user</option>
           {users.map((u) => (
@@ -218,7 +341,7 @@ export default function UsersPage() {
           placeholder="New password"
           value={newPassword}
           onChange={(e) => setNewPassword(e.target.value)}
-          className="w-full p-2 rounded bg-gray-800"
+          className="w-full text-white p-2 rounded bg-gray-800"
         />
 
         <button
@@ -229,12 +352,11 @@ export default function UsersPage() {
         </button>
       </div>
 
-      {/* Users */}
       <div className="grid gap-3">
         {users.map((user) => (
           <div
             key={user.id}
-            className="bg-white/5 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center"
+            className="bg-gray-800 text-white p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center"
           >
             <div>
               <div className="font-semibold">{user.full_name}</div>

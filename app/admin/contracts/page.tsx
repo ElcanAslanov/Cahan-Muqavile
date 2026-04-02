@@ -147,8 +147,8 @@ export default function ContractsPage() {
   }, []);
 
   return (
-    <div style={{ padding: 40, background: "#443636", minHeight: "100vh" }}>
-      <h1 style={{ marginBottom: 20, color: "white" }}>Contracts</h1>
+    <div style={{ padding: 40, background: "var(--bg-main)", minHeight: "100vh" }}>
+      <h1 style={{ marginBottom: 20, color: "black" }}>Contracts</h1>
 
       {/* Tabs */}
       <div style={{ marginBottom: 20 }}>
@@ -186,7 +186,8 @@ export default function ContractsPage() {
       {tab === "active" && (
         <div
           style={{
-            background: "#6b6b6b",
+            background: "var(--bg-card)",
+            color: "white",
             padding: 20,
             borderRadius: 10,
             marginBottom: 30,
@@ -202,9 +203,9 @@ export default function ContractsPage() {
           <select
             value={companyId}
             onChange={(e) => setCompanyId(e.target.value)}
-            style={{ padding: 8, marginRight: 10 }}
+            style={{ padding: 8, marginRight: 10,backgroundColor: "var(--bg-card)", color: "white"  }}
           >
-            <option value="">Select company</option>
+            <option value="" >Select company</option>
             {companies.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -216,13 +217,13 @@ export default function ContractsPage() {
             type="date"
             value={startDate}
             onChange={(e) => setStartDate(e.target.value)}
-            style={{ padding: 8, marginRight: 10 }}
+            style={{ padding: 8, marginRight: 10 ,backgroundColor: "var(--bg-card)", color: "white" }}
           />
 
           <select
             value={duration}
             onChange={(e) => setDuration(e.target.value)}
-            style={{ padding: 8, marginRight: 10 }}
+            style={{ padding: 8, marginRight: 10,backgroundColor: "var(--bg-card)", color: "white"  }}
           >
             <option value="1">1 month</option>
             <option value="3">3 months</option>
@@ -268,7 +269,7 @@ export default function ContractsPage() {
       {/* Contracts list */}
       <div
         style={{
-          background: "#6b6b6b",
+          background: "var(--bg-card)",
           padding: 20,
           borderRadius: 10,
         }}

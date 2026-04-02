@@ -56,8 +56,8 @@ export default function CompaniesPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6">
-      <h1 className="text-2xl font-bold mb-6">Companies</h1>
+    <div className="min-h-screen  text-white p-6">
+      <h1 className="text-2xl text-black font-bold mb-6">Companies</h1>
 
       {/* Add Company */}
       <div className="bg-white/5 p-4 rounded-xl mb-6 flex flex-col sm:flex-row gap-3 max-w-xl">
@@ -81,7 +81,7 @@ export default function CompaniesPage() {
         {companies.map((c) => (
           <div
             key={c.id}
-            className="bg-white/5 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center"
+            className="bg-gray-800 text-white p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center"
           >
             <div className="font-medium">{c.name}</div>
 

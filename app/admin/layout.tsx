@@ -61,7 +61,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           display: "flex",
           alignItems: "center",
           padding: 20,
-          background: "#9e4646",
+          background: "#485569",
           color: "white",
           position: "relative"
         }}
@@ -88,7 +88,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           onClick={logout}
           style={{
             marginLeft: "auto",
-            background: "red",
+            background: "#df2525",
             color: "white",
             border: "none",
             padding: "6px 10px",

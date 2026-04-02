@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
+
 type Contract = {
   id: string;
   company_name: string;
@@ -85,14 +86,14 @@ export default function DashboardPage() {
       style={{
         minHeight:"100vh",
         padding:"30px 20px",
-        background:"linear-gradient(180deg,#234C6A,#456882)",
+        background: "var(--bg-main)",
         margin:"0 auto"
       }}
     >
 
       <div style={{marginBottom:25}}>
-        <h1 style={{color:"white", fontSize:24}}>Dashboard</h1>
-        <p style={{color:"#f1f1f1",fontSize:15}}>
+        <h1 style={{color:"black", fontSize:24}}>Dashboard</h1>
+        <p style={{color:"black",fontSize:15}}>
           Select company to filter contracts
         </p>
       </div>
@@ -109,7 +110,7 @@ export default function DashboardPage() {
             padding:"12px 14px",
             borderRadius:8,
             border:"1px solid #334155",
-            background:"#1e293b",
+            background:"#485569",
             color:"white",
             fontSize:14
           }}
@@ -316,7 +317,7 @@ const dangerBadge = {
 }
 
 const pdfBtn = {
-  background:"linear-gradient(135deg,#3b82f6,#2563eb)",
+  background: "var(--primary)",
   color:"white",
   padding:"6px 10px",
   borderRadius:6,

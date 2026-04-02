@@ -3,6 +3,18 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* 🔥 ƏLAVƏ ETDİKLƏRİM */
+  --primary: #e11d2e;
+  --primary-hover: #b91c1c;
+
+  --bg-main: #f1ecec;
+  --bg-card: #1e293b;
+
+  --text-main: #ffffff;
+  --text-muted: #94a3b8;
+
+  --border: #334155;
 }
 
 @theme inline {

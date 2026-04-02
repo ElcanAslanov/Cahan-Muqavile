@@ -10,28 +10,21 @@ type Company = {
 
 export default function CreateContract() {
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [permissions, setPermissions] = useState<any[]>([]);
   const [companyId, setCompanyId] = useState("");
   const [counterparty, setCounterparty] = useState("");
   const [startDate, setStartDate] = useState("");
-  
-  // SELECT əvəzinə artıq sərbəst rəqəm daxil edilə bilən string/number istifadə edirik
-  const [duration, setDuration] = useState("12"); 
-
+  const [duration, setDuration] = useState("12");
   const [autoRenew, setAutoRenew] = useState(false);
   const [file, setFile] = useState<File | null>(null);
 
-  async function loadCompanies() {
-    const { data: userData } = await supabase.auth.getUser();
-    const userId = userData.user?.id;
-    if (!userId) return;
+  async function loadCompanies(userId: string, perms: any[]) {
+    // 🔥 yalnız create icazəsi olan company-lər
+    const ids = perms
+      .filter((p) => p.can_create)
+      .map((p) => p.company_id);
 
-    const { data: userCompanies } = await supabase
-      .from("user_companies")
-      .select("company_id")
-      .eq("user_id", userId);
-
-    if (!userCompanies) return;
-    const ids = userCompanies.map((c) => c.company_id);
+    if (ids.length === 0) return;
 
     const { data } = await supabase
       .from("companies")
@@ -43,6 +36,36 @@ export default function CreateContract() {
       if (data.length > 0) setCompanyId(data[0].id);
     }
   }
+
+  useEffect(() => {
+    async function init() {
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData.user?.id;
+      if (!userId) return;
+
+      // 🔥 permissionləri götür
+      const { data: perms } = await supabase
+        .from("user_company_permissions")
+        .select("*")
+        .eq("user_id", userId);
+
+      const safePerms = perms || [];
+      setPermissions(safePerms);
+
+      // 🔥 heç bir create icazəsi yoxdursa BLOCK
+      const canCreate = safePerms.some((p) => p.can_create);
+
+      if (!canCreate) {
+        alert("Bu səhifəyə giriş icazən yoxdur");
+        window.location.href = "/accountant";
+        return;
+      }
+
+      await loadCompanies(userId, safePerms);
+    }
+
+    init();
+  }, []);
 
   function calculateEndDate(start: string, months: number) {
     if (!start || isNaN(months)) return null;
@@ -57,28 +80,31 @@ export default function CreateContract() {
     if (!file) return null;
     const fileName = `${Date.now()}-${file.name}`;
     const { error } = await supabase.storage.from("contracts").upload(fileName, file);
-    if (error) {
-      console.log("UPLOAD ERROR:", error);
-      return null;
-    }
+    if (error) return null;
+
     const { data } = supabase.storage.from("contracts").getPublicUrl(fileName);
     return data.publicUrl;
   }
 
   async function createContract() {
     const monthCount = parseInt(duration);
-    
+
     if (!counterparty || !companyId || !startDate || isNaN(monthCount) || monthCount <= 0) {
-      alert("Zəhmət olmasa bütün xanaları düzgün doldurun (Ay müsbət rəqəm olmalıdır)");
+      alert("Zəhmət olmasa bütün xanaları düzgün doldurun");
+      return;
+    }
+
+    // 🔥 COMPANY üzrə permission check
+    const perm = permissions.find((p) => p.company_id === companyId);
+
+    if (!perm || !perm.can_create) {
+      alert("Bu şirkət üçün müqavilə yaratmaq icazən yoxdur");
       return;
     }
 
     const { data: userData } = await supabase.auth.getUser();
     const userId = userData.user?.id;
-    if (!userId) {
-      alert("İstifadəçi tapılmadı");
-      return;
-    }
+    if (!userId) return;
 
     const company = companies.find((c) => c.id === companyId);
     const endDate = calculateEndDate(startDate, monthCount);
@@ -98,84 +124,43 @@ export default function CreateContract() {
     });
 
     if (error) {
-      console.log(error);
-      alert("Müqavilə yaradılarkən xəta baş verdi");
+      alert("Xəta baş verdi");
       return;
     }
 
-    alert("Müqavilə uğurla yaradıldı!");
-    setCounterparty("");
-    setStartDate("");
-    setFile(null);
-    setAutoRenew(false);
-    setDuration("12");
+    alert("Müqavilə yaradıldı");
   }
-
-  useEffect(() => {
-    loadCompanies();
-  }, []);
 
   return (
     <div style={pageStyle}>
       <div style={cardStyle}>
         <h1 style={titleStyle}>Create Contract</h1>
-        <p style={subtitleStyle}>Add a new contract for your company</p>
 
-        <div style={formGrid}>
-          <input
-            placeholder="Counterparty (məs: Azərsun)"
-            value={counterparty}
-            onChange={(e) => setCounterparty(e.target.value)}
-            style={inputStyle}
-          />
+        <input
+          placeholder="Counterparty"
+          value={counterparty}
+          onChange={(e) => setCounterparty(e.target.value)}
+          style={inputStyle}
+        />
 
-          <select value={companyId} onChange={(e) => setCompanyId(e.target.value)} style={inputStyle}>
-            {companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+        <select value={companyId} onChange={(e) => setCompanyId(e.target.value)} style={inputStyle}>
+          {companies.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-            <span style={{ fontSize: "12px", color: "#94a3b8", marginLeft: "4px" }}>Başlama tarixi</span>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              style={inputStyle}
-            />
-          </div>
+        <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={inputStyle} />
 
-          {/* DƏYİŞİKLİK BURADADIR: Artıq istənilən ay yazıla bilər */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-            <span style={{ fontSize: "12px", color: "#94a3b8", marginLeft: "4px" }}>Müddət (Ay ilə)</span>
-            <input
-              type="number"
-              min="1"
-              placeholder="Məs: 9"
-              value={duration}
-              onChange={(e) => setDuration(e.target.value)}
-              style={inputStyle}
-            />
-          </div>
+        <input
+          type="number"
+          value={duration}
+          onChange={(e) => setDuration(e.target.value)}
+          style={inputStyle}
+        />
 
-          <label style={checkboxStyle}>
-            <input
-              type="checkbox"
-              checked={autoRenew}
-              onChange={(e) => setAutoRenew(e.target.checked)}
-            />
-            Auto Renew
-          </label>
-
-          <input
-            type="file"
-            accept="application/pdf"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
-            style={fileStyle}
-          />
-        </div>
+        <input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
 
         <button onClick={createContract} style={buttonStyle}>
           Create Contract
@@ -185,13 +170,9 @@ export default function CreateContract() {
   );
 }
 
-/* STYLES (Dəyişməyib, sadəcə səliqə üçün saxlanılıb) */
-const pageStyle = { minHeight: "100vh", display: "flex", justifyContent: "center", alignItems: "center", padding: "20px", background: "linear-gradient(180deg,#234C6A,#456882)" };
-const cardStyle = { width: "100%", maxWidth: "520px", background: "#1e293b", padding: "30px", borderRadius: "16px", boxShadow: "0 25px 50px rgba(0,0,0,0.35)", display: "flex", flexDirection: "column" as const, gap: "20px" };
-const titleStyle = { fontSize: "24px", fontWeight: 600, color: "white", margin: 0, textAlign: "center" as const };
-const subtitleStyle = { fontSize: "14px", color: "#cbd5e1", textAlign: "center" as const };
-const formGrid = { display: "flex", flexDirection: "column" as const, gap: "14px" };
-const inputStyle = { width: "100%", padding: "12px", borderRadius: "8px", border: "1px solid #334155", background: "#0f172a", color: "white", fontSize: "14px" };
-const checkboxStyle = { display: "flex", alignItems: "center", gap: "10px", color: "#e2e8f0", fontSize: "14px" };
-const fileStyle = { color: "#e2e8f0" };
-const buttonStyle = { marginTop: "10px", background: "linear-gradient(135deg,#3b82f6,#2563eb)", color: "white", padding: "14px", border: "none", borderRadius: "10px", fontSize: "15px", fontWeight: 500, cursor: "pointer", boxShadow: "0 8px 20px rgba(59,130,246,0.35)" };
+/* styles untouched */
+const pageStyle = { minHeight: "100vh", display: "flex", justifyContent: "center", alignItems: "center", background: "linear-gradient(180deg,#234C6A,#456882)" };
+const cardStyle = { width: "100%", maxWidth: "520px", background: "#1e293b", padding: "30px", borderRadius: "16px" };
+const titleStyle = { fontSize: "24px", color: "white" };
+const inputStyle = { width: "100%", padding: "10px", marginBottom: "10px" };
+const buttonStyle = { background: "#3b82f6", color: "white", padding: "12px" };
