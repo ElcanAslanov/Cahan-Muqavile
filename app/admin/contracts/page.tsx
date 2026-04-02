@@ -111,23 +111,23 @@ export default function ContractsPage() {
     loadContracts();
   }
 
- async function deleteContract(id: string) {
-  const confirmDelete = confirm("Bu muqavile tam silinsin?");
-  if (!confirmDelete) return;
+  async function deleteContract(id: string) {
+    const confirmDelete = confirm("Bu muqavile tam silinsin?");
+    if (!confirmDelete) return;
 
-  const { error } = await supabase
-    .from("contracts")
-    .delete()
-    .eq("id", id);
+    const { error } = await supabase
+      .from("contracts")
+      .delete()
+      .eq("id", id);
 
-  if (error) {
-    alert("Delete error: " + error.message);
-    console.log("DELETE ERROR:", error);
-    return;
+    if (error) {
+      alert("Delete error: " + error.message);
+      console.log("DELETE ERROR:", error);
+      return;
+    }
+
+    loadContracts();
   }
-
-  loadContracts();
-}
 
   function resetForm() {
     setCounterparty("");
@@ -148,7 +148,7 @@ export default function ContractsPage() {
 
   return (
     <div style={{ padding: 40, background: "var(--bg-main)", minHeight: "100vh" }}>
-      <h1 style={{ marginBottom: 20, color: "black" }}>Contracts</h1>
+      <h1 style={{ marginBottom: 20, color: "black" }}>Müqavilələr</h1>
 
       {/* Tabs */}
       <div style={{ marginBottom: 20 }}>
@@ -164,7 +164,7 @@ export default function ContractsPage() {
             cursor: "pointer",
           }}
         >
-          Active
+          Aktiv
         </button>
 
         <button
@@ -178,7 +178,7 @@ export default function ContractsPage() {
             cursor: "pointer",
           }}
         >
-          Archived
+          Arşiv
         </button>
       </div>
 
@@ -194,7 +194,7 @@ export default function ContractsPage() {
           }}
         >
           <input
-            placeholder="Counterparty"
+            placeholder="Şirkət adı"
             value={counterparty}
             onChange={(e) => setCounterparty(e.target.value)}
             style={{ padding: 8, marginRight: 10 }}
@@ -203,9 +203,9 @@ export default function ContractsPage() {
           <select
             value={companyId}
             onChange={(e) => setCompanyId(e.target.value)}
-            style={{ padding: 8, marginRight: 10,backgroundColor: "var(--bg-card)", color: "white"  }}
+            style={{ padding: 8, marginRight: 10, backgroundColor: "var(--bg-card)", color: "white" }}
           >
-            <option value="" >Select company</option>
+            <option value="" >Şirkət seçin</option>
             {companies.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -217,24 +217,24 @@ export default function ContractsPage() {
             type="date"
             value={startDate}
             onChange={(e) => setStartDate(e.target.value)}
-            style={{ padding: 8, marginRight: 10 ,backgroundColor: "var(--bg-card)", color: "white" }}
+            style={{ padding: 8, marginRight: 10, backgroundColor: "var(--bg-card)", color: "white" }}
           />
 
           <select
             value={duration}
             onChange={(e) => setDuration(e.target.value)}
-            style={{ padding: 8, marginRight: 10,backgroundColor: "var(--bg-card)", color: "white"  }}
+            style={{ padding: 8, marginRight: 10, backgroundColor: "var(--bg-card)", color: "white" }}
           >
-            <option value="1">1 month</option>
-            <option value="3">3 months</option>
-            <option value="6">6 months</option>
-            <option value="12">1 year</option>
-            <option value="24">2 years</option>
-            <option value="36">3 years</option>
+            <option value="1">1 ay</option>
+            <option value="3">3 ay</option>
+            <option value="6">6 ay</option>
+            <option value="12">1 il</option>
+            <option value="24">2 il</option>
+            <option value="36">3 il</option>
           </select>
 
           <label style={{ marginRight: 10, color: "white" }}>
-            Auto Renew
+            Avtomatik yeniləmə
             <input
               type="checkbox"
               checked={autoRenew}
@@ -245,10 +245,25 @@ export default function ContractsPage() {
 
           <input
             type="file"
+            id="pdfUpload"
             accept="application/pdf"
             onChange={(e) => setFile(e.target.files?.[0] || null)}
-            style={{ marginRight: 10 }}
+            style={{ display: "none" }}
           />
+
+          <label
+            htmlFor="pdfUpload"
+            style={{
+              padding: "10px 16px",
+              margin: "0 20px 0 20px",
+              background: "#007bff",
+              color: "white",
+              borderRadius: "6px",
+              cursor: "pointer"
+            }}
+          >
+            PDF seç
+          </label>
 
           <button
             onClick={addContract}
@@ -261,7 +276,7 @@ export default function ContractsPage() {
               cursor: "pointer",
             }}
           >
-            Add Contract
+            Əlavə et
           </button>
         </div>
       )}
@@ -277,7 +292,7 @@ export default function ContractsPage() {
         {contracts.map((c) => {
           const pdfUrl = c.file_url
             ? supabase.storage.from("contracts").getPublicUrl(c.file_url).data
-                .publicUrl
+              .publicUrl
             : null;
 
           return (
@@ -313,7 +328,7 @@ export default function ContractsPage() {
                       textDecoration: "none",
                     }}
                   >
-                    View PDF
+                    PDF-i göstər
                   </a>
                 )}
 
@@ -329,7 +344,7 @@ export default function ContractsPage() {
                       cursor: "pointer",
                     }}
                   >
-                    Archive
+                    Arşivə at
                   </button>
                 ) : (
                   <>
@@ -345,7 +360,7 @@ export default function ContractsPage() {
                         cursor: "pointer",
                       }}
                     >
-                      Restore
+                      Geri qaytar
                     </button>
 
                     <button
@@ -359,7 +374,7 @@ export default function ContractsPage() {
                         cursor: "pointer",
                       }}
                     >
-                      Delete
+                      Sil
                     </button>
                   </>
                 )}

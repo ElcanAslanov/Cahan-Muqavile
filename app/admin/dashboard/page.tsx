@@ -92,16 +92,16 @@ export default function DashboardPage() {
     >
 
       <div style={{marginBottom:25}}>
-        <h1 style={{color:"black", fontSize:24}}>Dashboard</h1>
+        <h1 style={{color:"black", fontSize:24}}>Ana səhifə</h1>
         <p style={{color:"black",fontSize:15}}>
-          Select company to filter contracts
+           Müqavilələri filtr etmək üçün şirkət seçin
         </p>
       </div>
 
       {/* SEARCH */}
       <div style={{marginBottom:30}}>
         <input
-          placeholder="Search contracts..."
+          placeholder="Müqavilələri axtar..."
           value={search}
           onChange={(e)=>setSearch(e.target.value)}
           onClick={(e)=>e.stopPropagation()}
@@ -163,7 +163,7 @@ export default function DashboardPage() {
               </h3>
 
               <p style={{color:"#cbd5e1",fontSize:14}}>
-                {count} contracts
+                {count} müqavilə
               </p>
 
             </div>
@@ -186,7 +186,7 @@ export default function DashboardPage() {
       >
 
         <h2 style={{marginBottom:20, color:"#e6e6e6",fontSize:20}}>
-          {selectedCompany ? `${selectedCompany} Contracts` : "All Contracts"}
+          {selectedCompany ? `${selectedCompany} Contracts` : "Bütün müqavilələr"}
         </h2>
 
         <table
@@ -199,12 +199,12 @@ export default function DashboardPage() {
 
           <thead>
             <tr style={{borderBottom:"1px solid #c4c4c4"}}>
-              <th style={thStyle}>Company</th>
-              <th style={thStyle}>Counterparty</th>
-              <th style={thStyle}>Start</th>
-              <th style={thStyle}>End</th>
-              <th style={thStyle}>Expiry</th>
-              <th style={thStyle}>Renew</th>
+              <th style={thStyle}>Şirkət</th>
+              <th style={thStyle}>Müqavilə</th>
+              <th style={thStyle}>Başlanma</th>
+              <th style={thStyle}>Bitmə</th>
+              <th style={thStyle}>Vaxtın Bitməsi</th>
+              <th style={thStyle}>Yeniləmə</th>
               <th style={thStyle}>PDF</th>
             </tr>
           </thead>
@@ -230,19 +230,19 @@ export default function DashboardPage() {
 
                   <td style={tdStyle}>
                     {c.auto_renew ? (
-                      <span style={renewBadge}>🔄 RENEW</span>
+                      <span style={renewBadge}>🔄 Yeniləmə</span>
                     ) : (
-                      <span style={noRenewBadge}>⛔ No renew</span>
+                      <span style={noRenewBadge}>⛔ Yeniləmə yoxdur</span>
                     )}
                   </td>
 
                   <td style={tdStyle}>
                     {c.file_url ? (
                       <a href={c.file_url} target="_blank" style={pdfBtn}>
-                        View PDF
+                        PDFə bax
                       </a>
                     ) : (
-                      <span>No PDF</span>
+                      <span>PDF yoxdur</span>
                     )}
                   </td>
 

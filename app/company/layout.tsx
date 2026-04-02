@@ -76,7 +76,7 @@ export default function CompanyLayout({
     const active = pathname === href
 
     return {
-      color:"white",
+      color:"black",
       textDecoration:"none",
       padding:"8px 14px",
       borderRadius:8,
@@ -92,14 +92,15 @@ export default function CompanyLayout({
 
   return(
 
-    <div style={{minHeight:"100vh",background:"#0f172a",color:"white"}}>
+    <div style={{minHeight:"100vh",background:"#f1ecec",color:"white"}}>
 
       <nav
         style={{
           display:"flex",
           alignItems:"center",
           padding:"14px 18px",
-          background:"#111827",
+          color:"white",
+          background:"#485569",
           borderBottom:"1px solid #1f2937",
           gap:12
         }}
@@ -209,7 +210,8 @@ export default function CompanyLayout({
           padding:"30px 20px",
           width:"100%",
           maxWidth:1200,
-          margin:"0 auto"
+          margin:"0 auto",
+          background:"#f1ecec",
         }}
       >
         {children}

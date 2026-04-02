@@ -57,12 +57,12 @@ export default function CompaniesPage() {
 
   return (
     <div className="min-h-screen  text-white p-6">
-      <h1 className="text-2xl text-black font-bold mb-6">Companies</h1>
+      <h1 className="text-2xl text-black font-bold mb-6">Şirkətlər</h1>
 
       {/* Add Company */}
       <div className="bg-white/5 p-4 rounded-xl mb-6 flex flex-col sm:flex-row gap-3 max-w-xl">
         <input
-          placeholder="Company name"
+          placeholder="Şirkət adı"
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="flex-1 p-2 rounded bg-gray-800"
@@ -72,7 +72,7 @@ export default function CompaniesPage() {
           onClick={addCompany}
           className="bg-blue-600 px-4 py-2 rounded w-full sm:w-auto"
         >
-          Add
+          Əlavə et
         </button>
       </div>
 
@@ -89,7 +89,7 @@ export default function CompaniesPage() {
               onClick={() => deleteCompany(c.id)}
               className="mt-3 sm:mt-0 bg-red-600 px-3 py-1 rounded"
             >
-              Delete
+              Sil
             </button>
           </div>
         ))}

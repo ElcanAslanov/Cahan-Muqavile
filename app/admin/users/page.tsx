@@ -179,7 +179,7 @@ export default function UsersPage() {
 
       <div className="bg-white/5 p-4 rounded-xl mb-6 space-y-3 max-w-xl">
         <input
-          placeholder="Full name"
+          placeholder="Tam ad"
           value={name}
           onChange={(e) => setName(e.target.value)}
           className="w-full p-2 rounded text-white bg-gray-800"
@@ -193,7 +193,7 @@ export default function UsersPage() {
         />
 
         <input
-          placeholder="Password"
+          placeholder="Parol"
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
@@ -214,14 +214,14 @@ export default function UsersPage() {
           className="w-full text-white p-2 rounded bg-gray-800"
         >
           <option value="ADMIN">ADMIN</option>
-          <option value="COMPANY_MANAGER">COMPANY_MANAGER</option>
-          <option value="HOLDING_MANAGER">HOLDING_MANAGER</option>
-          <option value="ACCOUNTANT">ACCOUNTANT</option>
+          <option value="COMPANY_MANAGER">Şirkət Meneceri</option>
+          <option value="HOLDING_MANAGER">Holding Rəhbəri</option>
+          <option value="ACCOUNTANT">Mühasib</option>
         </select>
 
         {(role === "COMPANY_MANAGER" || role === "ACCOUNTANT") && (
           <div>
-            <div className="text-sm mb-1">Select Companies</div>
+            <div className="text-sm mb-1">Şirkət seçin</div>
             {companies.map((c) => (
               <label key={c.id} className="block text-sm">
                 <input
@@ -236,16 +236,16 @@ export default function UsersPage() {
         )}
 
         <div className="mt-4">
-          <div className="text-sm mb-1">Permissions</div>
+          <div className="text-sm mb-1">İcazələr</div>
 
           <table className="w-full text-sm border border-gray-700">
             <thead>
               <tr className="bg-gray-800 text-white">
-                <th className="p-2 text-left">Company</th>
-                <th>View</th>
-                <th>Create</th>
-                <th>Delete</th>
-                <th>Archive</th>
+                <th className="p-2 text-left">Şirkət</th>
+                <th className="text-left">Baxmaq</th>
+                <th className="text-left">Yaratmaq</th>
+                <th className="text-left">Silmək</th>
+                <th className="text-left">Arxivləşdirmək</th>
               </tr>
             </thead>
 
@@ -317,9 +317,9 @@ export default function UsersPage() {
 
         <button
           onClick={addUser}
-          className="bg-blue-600 px-4 py-2 rounded w-full"
+          className="bg-blue-600 text-white px-4 py-2 rounded w-full"
         >
-          Add User
+        Əlavə et
         </button>
       </div>
 
@@ -329,7 +329,7 @@ export default function UsersPage() {
           onChange={(e) => setSelectedUser(e.target.value)}
           className="w-full p-2 rounded bg-gray-800 text-white"
         >
-          <option value="">Select user</option>
+          <option value="">İstifadəçi seçin</option>
           {users.map((u) => (
             <option key={u.id} value={u.id}>
               {u.full_name} ({u.email})
@@ -338,7 +338,7 @@ export default function UsersPage() {
         </select>
 
         <input
-          placeholder="New password"
+          placeholder="Yeni parol"
           value={newPassword}
           onChange={(e) => setNewPassword(e.target.value)}
           className="w-full text-white p-2 rounded bg-gray-800"
@@ -346,9 +346,9 @@ export default function UsersPage() {
 
         <button
           onClick={changePassword}
-          className="bg-green-600 px-4 py-2 rounded w-full"
+          className="bg-green-600 text-white px-4 py-2 rounded w-full"
         >
-          Change Password
+         Parolu dəyiş
         </button>
       </div>
 
@@ -368,7 +368,7 @@ export default function UsersPage() {
               onClick={() => deleteUser(user.id)}
               className="mt-3 sm:mt-0 bg-red-600 px-3 py-1 rounded"
             >
-              Delete
+              Sil
             </button>
           </div>
         ))}
