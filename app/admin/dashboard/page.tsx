@@ -92,7 +92,7 @@ export default function DashboardPage() {
     >
 
       <div style={{marginBottom:25}}>
-        <h1 style={{color:"black", fontSize:24}}>Ana səhifə</h1>
+        <h1 style={{color:"black", fontSize:24}}>İdarəetmə paneli</h1>
         <p style={{color:"black",fontSize:15}}>
            Müqavilələri filtr etmək üçün şirkət seçin
         </p>

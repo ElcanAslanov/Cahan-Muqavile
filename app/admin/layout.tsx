@@ -69,10 +69,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
         {/* LEFT MENU (desktop) */}
         <div className="nav-links">
-          <Link href="/admin/dashboard">Dashboard</Link>
-          <Link href="/admin/contracts">Contracts</Link>
-          <Link href="/admin/users">Users</Link>
-          <Link href="/admin/companies">Companies</Link>
+          <Link href="/admin/dashboard">İdarəetmə paneli</Link>
+          <Link href="/admin/contracts">Müqavilələr</Link>
+          <Link href="/admin/users">İstifadəçilər</Link>
+          <Link href="/admin/companies">Şirkətlər</Link>
         </div>
 
         {/* HAMBURGER (mobile) */}
