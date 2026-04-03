@@ -23,6 +23,7 @@ export default function CompanyDashboard() {
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [permissions, setPermissions] = useState<any[]>([]);
+  const [editingContract, setEditingContract] = useState<any>(null);
 
   // SIRALAMA UCUN STATE
   const [sortConfig, setSortConfig] = useState<{ key: keyof Contract | null, direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
@@ -86,6 +87,52 @@ export default function CompanyDashboard() {
     }
     setLoading(false);
   }
+  async function updateContract() {
+    if (!editingContract) return;
+
+    let fileUrl = editingContract.file_url;
+
+    // yeni file varsa upload et
+    if (editingContract.newFile) {
+      const fileName = `${Date.now()}-${editingContract.newFile.name}`;
+
+      const { error } = await supabase.storage
+        .from("contracts")
+        .upload(fileName, editingContract.newFile);
+
+      if (!error) {
+        const { data } = supabase.storage
+          .from("contracts")
+          .getPublicUrl(fileName);
+
+        fileUrl = data.publicUrl;
+      }
+    }
+
+    const { error } = await supabase
+      .from("contracts")
+      .update({
+        company_name: editingContract.company_name,
+        counterparty: editingContract.counterparty,
+        start_date: editingContract.start_date,
+        end_date: editingContract.end_date,
+        file_url: fileUrl,
+      })
+      .eq("id", editingContract.id);
+
+    if (error) {
+      alert("Xəta baş verdi");
+      return;
+    }
+
+    alert("Updated");
+    setEditingContract(null);
+    loadContracts();
+  }
+  function openEditModal(contract: any) {
+    setEditingContract(contract);
+  }
+
 
   useEffect(() => {
     loadContracts();
@@ -202,8 +249,8 @@ export default function CompanyDashboard() {
       <div style={headerWrap}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "20px" }}>
           <div>
-            <h1 style={titleStyle}>Company Contracts</h1>
-            <p style={subtitleStyle}>Manage active contracts for your companies</p>
+            <h1 style={titleStyle}>Şirkət Müqavilələri</h1>
+            <p style={subtitleStyle}>Müqavilə axtar</p>
           </div>
 
           {/* EXPORT BUTONLARI */}
@@ -216,7 +263,7 @@ export default function CompanyDashboard() {
 
       <div style={{ marginBottom: 24 }}>
         <input
-          placeholder="Search contracts..."
+          placeholder="Müqavilə axtar..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           onClick={(e) => e.stopPropagation()}
@@ -243,7 +290,7 @@ export default function CompanyDashboard() {
                 }}
               >
                 <h3 style={{ margin: 0, fontSize: 15, color: "white" }}>{company}</h3>
-                <p style={{ margin: "4px 0 0 0", fontSize: 13, color: "#cbd5e1" }}>{count} contracts</p>
+                <p style={{ margin: "4px 0 0 0", fontSize: 13, color: "#cbd5e1" }}>{count} müqavilə</p>
               </div>
             );
           })}
@@ -260,14 +307,14 @@ export default function CompanyDashboard() {
             <table style={tableStyle}>
               <thead>
                 <tr style={{ borderBottom: "1px solid #334155" }}>
-                  <th style={{ ...thStyle, cursor: "pointer" }} onClick={() => requestSort("company_name")}>Company ↕</th>
-                  <th style={{ ...thStyle, cursor: "pointer" }} onClick={() => requestSort("counterparty")}>Counterparty ↕</th>
-                  <th style={{ ...thStyle, cursor: "pointer" }} onClick={() => requestSort("start_date")}>Start Date ↕</th>
-                  <th style={{ ...thStyle, cursor: "pointer" }} onClick={() => requestSort("end_date")}>End Date ↕</th>
+                  <th style={{ ...thStyle, cursor: "pointer" }} onClick={() => requestSort("company_name")}>Şirkət ↕</th>
+                  <th style={{ ...thStyle, cursor: "pointer" }} onClick={() => requestSort("counterparty")}>Müqavilə ↕</th>
+                  <th style={{ ...thStyle, cursor: "pointer" }} onClick={() => requestSort("start_date")}>Başlama ↕</th>
+                  <th style={{ ...thStyle, cursor: "pointer" }} onClick={() => requestSort("end_date")}>Bitmə ↕</th>
                   <th style={thStyle}>Status</th>
-                  <th style={thStyle}>Renewal</th>
-                  <th style={thStyle}>Document</th>
-                  <th style={thStyle}>Action</th>
+                  <th style={thStyle}>Yeniləmə</th>
+                  <th style={thStyle}>Sənəd</th>
+                  <th style={thStyle}>Əməliyyatlar</th>
                 </tr>
               </thead>
               <tbody>
@@ -277,6 +324,9 @@ export default function CompanyDashboard() {
                   );
                   const canArchive = permissions.some(
                     (p) => p.company_id === c.company_id && p.can_archive
+                  );
+                  const canEdit = permissions.some(
+                    (p) => p.company_id === c.company_id && p.can_edit
                   );
                   const days = daysLeft(c.end_date);
                   return (
@@ -288,14 +338,14 @@ export default function CompanyDashboard() {
                       <td style={tdStyle}>{expiryBadge(days)}</td>
                       <td style={tdStyle}>
                         {c.auto_renew ? (
-                          <span style={renewBadge}>🔄 Auto</span>
+                          <span style={renewBadge}>🔄 Yeniləmə</span>
                         ) : (
-                          <span style={noRenewBadge}>⛔ Manual</span>
+                          <span style={noRenewBadge}>⛔ Yeniləmə yoxdur</span>
                         )}
                       </td>
                       <td style={tdStyle}>
                         {c.file_url ? (
-                          <a href={c.file_url} target="_blank" rel="noopener noreferrer" style={pdfBtn}>View PDF</a>
+                          <a href={c.file_url} target="_blank" rel="noopener noreferrer" style={pdfBtn}>Pdf bax</a>
                         ) : (
                           <span style={{ color: "#64748b" }}>N/A</span>
                         )}
@@ -314,7 +364,7 @@ export default function CompanyDashboard() {
                               marginRight: "6px",
                             }}
                           >
-                            Archive
+                            Arxiv
                           </button>
                         )}
 
@@ -329,7 +379,22 @@ export default function CompanyDashboard() {
                               fontSize: "12px",
                             }}
                           >
-                            Delete
+                            Sil
+                          </button>
+                        )}
+                        {canEdit && (
+                          <button
+                            onClick={() => openEditModal(c)}
+                            style={{
+                              background: "#2563eb",
+                              color: "white",
+                              padding: "6px 10px",
+                              borderRadius: "6px",
+                              fontSize: "12px",
+                              margin: " 0 0 0 6px",
+                            }}
+                          >
+                            Edit
                           </button>
                         )}
                       </td>
@@ -365,13 +430,13 @@ export default function CompanyDashboard() {
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 15, paddingTop: 15, borderTop: "1px solid #334155" }}>
                     <div>
                       {c.auto_renew ? (
-                        <span style={renewBadge}>🔄 Auto Renew</span>
+                        <span style={renewBadge}>🔄Avtomatik Yeniləmə</span>
                       ) : (
                         <span style={noRenewBadge}>⛔ Manual</span>
                       )}
                     </div>
                     {c.file_url && (
-                      <a href={c.file_url} target="_blank" rel="noopener noreferrer" style={pdfBtn}>View PDF</a>
+                      <a href={c.file_url} target="_blank" rel="noopener noreferrer" style={pdfBtn}>Pdf bax</a>
                     )}
                   </div>
                   {permissions.some(
@@ -388,7 +453,7 @@ export default function CompanyDashboard() {
                           marginTop: "10px",
                         }}
                       >
-                        Delete
+                        Sil
                       </button>
                     )}
                   {permissions.some(
@@ -405,7 +470,7 @@ export default function CompanyDashboard() {
                           marginTop: "10px",
                         }}
                       >
-                        Archive
+                        Arxiv
                       </button>
                     )}
                 </div>
@@ -424,15 +489,124 @@ export default function CompanyDashboard() {
           .mobile-cards { display: none !important; }
         }
       `}</style>
+      {editingContract && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background: "rgba(0,0,0,0.6)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 999,
+          }}
+        >
+          <div
+            style={{
+              background: "white",
+              padding: 25,
+              borderRadius: 12,
+              width: 400,
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
+            <h3>Edit Contract</h3>
+
+            {/* COMPANY */}
+            <select
+              value={editingContract.company_name}
+              onChange={(e) =>
+                setEditingContract({
+                  ...editingContract,
+                  company_name: e.target.value,
+                })
+              }
+              style={inputStyle}
+            >
+              {companies.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+
+            {/* COUNTERPARTY */}
+            <input
+              value={editingContract.counterparty}
+              onChange={(e) =>
+                setEditingContract({
+                  ...editingContract,
+                  counterparty: e.target.value,
+                })
+              }
+              placeholder="Counterparty"
+              style={inputStyle}
+            />
+
+            {/* START DATE */}
+            <input
+              type="date"
+              value={editingContract.start_date}
+              onChange={(e) =>
+                setEditingContract({
+                  ...editingContract,
+                  start_date: e.target.value,
+                })
+              }
+              style={inputStyle}
+            />
+
+            {/* END DATE */}
+            <input
+              type="date"
+              value={editingContract.end_date}
+              onChange={(e) =>
+                setEditingContract({
+                  ...editingContract,
+                  end_date: e.target.value,
+                })
+              }
+              style={inputStyle}
+            />
+
+            {/* FILE */}
+            <input
+              type="file"
+              onChange={(e) =>
+                setEditingContract({
+                  ...editingContract,
+                  newFile: e.target.files?.[0],
+                })
+              }
+            />
+
+            {/* BUTTONS */}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={updateContract} style={saveBtn}>
+                Save
+              </button>
+              <button onClick={() => setEditingContract(null)} style={cancelBtn}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+
   );
 }
 
 // Sənin köhnə funksiyaların və nişanların (status badge)
 function expiryBadge(days: number) {
-  if (days <= 7) return <span style={dangerBadge}>7 DAYS</span>;
-  if (days <= 30) return <span style={warningBadge}>30 DAYS</span>;
-  return <span style={safeBadge}>ACTIVE</span>;
+  if (days <= 7) return <span style={dangerBadge}>7 Gün</span>;
+  if (days <= 30) return <span style={warningBadge}>30 GÜN</span>;
+  return <span style={safeBadge}>Aktiv</span>;
 }
 
 /* STYLES */
@@ -464,3 +638,26 @@ const emptyCard = { background: "#1e293b", padding: "40px", borderRadius: "16px"
 // EXPORT DÜYMƏLƏRİ ÜÇÜN STİLLƏR (Arxa fonlu)
 const excelBtnStyle = { background: "#107c41", color: "white", padding: "8px 16px", borderRadius: "8px", border: "none", cursor: "pointer", fontSize: "13px", fontWeight: 600, boxShadow: "0 4px 10px rgba(0,0,0,0.2)" };
 const pdfExportBtnStyle = { background: "#e11d48", color: "white", padding: "8px 16px", borderRadius: "8px", border: "none", cursor: "pointer", fontSize: "13px", fontWeight: 600, boxShadow: "0 4px 10px rgba(0,0,0,0.2)" };
+const inputStyle = {
+  padding: "10px",
+  border: "1px solid #ccc",
+  borderRadius: "6px",
+   background: "var(--bg-card)",
+  color: "white"
+};
+
+const saveBtn = {
+  background: "var(--bg-card)",
+  color: "white",
+  padding: "8px 12px",
+  borderRadius: "6px",
+  border: "none",
+};
+
+const cancelBtn = {
+  background: "var(--bg-card)",
+  color: "white",
+  padding: "8px 12px",
+  borderRadius: "6px",
+  border: "none",
+};

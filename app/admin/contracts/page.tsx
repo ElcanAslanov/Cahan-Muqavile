@@ -29,6 +29,7 @@ export default function ContractsPage() {
   const [duration, setDuration] = useState("12");
   const [autoRenew, setAutoRenew] = useState(false);
   const [file, setFile] = useState<File | null>(null);
+  const [editingContract, setEditingContract] = useState<any>(null)
 
   async function loadContracts() {
     const { data } = await supabase
@@ -128,7 +129,29 @@ export default function ContractsPage() {
 
     loadContracts();
   }
+  async function updateContract() {
+    if (!editingContract) return;
 
+    const selectedCompany = companies.find(
+      (c) => c.id === editingContract.company_id
+    );
+
+    const { error } = await supabase
+      .from("contracts")
+      .update({
+        counterparty: editingContract.counterparty,
+        start_date: editingContract.start_date,
+        end_date: editingContract.end_date,
+        company_id: editingContract.company_id,
+        company_name: selectedCompany?.name || null, // 🔥 ƏSAS FIX
+      })
+      .eq("id", editingContract.id);
+
+    if (!error) {
+      setEditingContract(null);
+      loadContracts();
+    }
+  }
   function resetForm() {
     setCounterparty("");
     setCompanyId("");
@@ -203,9 +226,14 @@ export default function ContractsPage() {
           <select
             value={companyId}
             onChange={(e) => setCompanyId(e.target.value)}
-            style={{ padding: 8, marginRight: 10, backgroundColor: "var(--bg-card)", color: "white" }}
+            style={{
+              padding: 8,
+              marginRight: 10,
+              backgroundColor: "var(--bg-card)",
+              color: "white",
+            }}
           >
-            <option value="" >Şirkət seçin</option>
+            <option value="">Şirkət seçin</option>
             {companies.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -217,13 +245,23 @@ export default function ContractsPage() {
             type="date"
             value={startDate}
             onChange={(e) => setStartDate(e.target.value)}
-            style={{ padding: 8, marginRight: 10, backgroundColor: "var(--bg-card)", color: "white" }}
+            style={{
+              padding: 8,
+              marginRight: 10,
+              backgroundColor: "var(--bg-card)",
+              color: "white",
+            }}
           />
 
           <select
             value={duration}
             onChange={(e) => setDuration(e.target.value)}
-            style={{ padding: 8, marginRight: 10, backgroundColor: "var(--bg-card)", color: "white" }}
+            style={{
+              padding: 8,
+              marginRight: 10,
+              backgroundColor: "var(--bg-card)",
+              color: "white",
+            }}
           >
             <option value="1">1 ay</option>
             <option value="3">3 ay</option>
@@ -259,7 +297,7 @@ export default function ContractsPage() {
               background: "#007bff",
               color: "white",
               borderRadius: "6px",
-              cursor: "pointer"
+              cursor: "pointer",
             }}
           >
             PDF seç
@@ -291,8 +329,7 @@ export default function ContractsPage() {
       >
         {contracts.map((c) => {
           const pdfUrl = c.file_url
-            ? supabase.storage.from("contracts").getPublicUrl(c.file_url).data
-              .publicUrl
+            ? supabase.storage.from("contracts").getPublicUrl(c.file_url).data.publicUrl
             : null;
 
           return (
@@ -301,6 +338,7 @@ export default function ContractsPage() {
               style={{
                 display: "flex",
                 justifyContent: "space-between",
+                alignItems: "center",
                 marginBottom: 15,
                 paddingBottom: 10,
                 borderBottom: "1px solid #aaa",
@@ -314,11 +352,12 @@ export default function ContractsPage() {
                 </div>
               </div>
 
-              <div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 {pdfUrl && (
                   <a
                     href={pdfUrl}
                     target="_blank"
+                    rel="noopener noreferrer"
                     style={{
                       marginRight: 10,
                       background: "#2563eb",
@@ -333,19 +372,35 @@ export default function ContractsPage() {
                 )}
 
                 {tab === "active" ? (
-                  <button
-                    onClick={() => archiveContract(c.id)}
-                    style={{
-                      background: "#ef4444",
-                      color: "white",
-                      border: "none",
-                      padding: "6px 10px",
-                      borderRadius: 6,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Arşivə at
-                  </button>
+                  <>
+                    <button
+                      onClick={() => setEditingContract(c)}
+                      style={{
+                        background: "#2563eb",
+                        color: "white",
+                        border: "none",
+                        padding: "6px 10px",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Edit
+                    </button>
+
+                    <button
+                      onClick={() => archiveContract(c.id)}
+                      style={{
+                        background: "#ef4444",
+                        color: "white",
+                        border: "none",
+                        padding: "6px 10px",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Arşivə at
+                    </button>
+                  </>
                 ) : (
                   <>
                     <button
@@ -383,6 +438,152 @@ export default function ContractsPage() {
           );
         })}
       </div>
+
+      {/* EDIT MODAL */}
+      {editingContract && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 9999,
+          }}
+        >
+          <div
+            style={{
+              background: "var(--bg-card)",
+              padding: 20,
+              borderRadius: 10,
+              width: 400,
+              color: "white",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 15 }}>Edit Müqavilə</h3>
+
+            <input
+              value={editingContract.counterparty}
+              onChange={(e) =>
+                setEditingContract({
+                  ...editingContract,
+                  counterparty: e.target.value,
+                })
+              }
+              style={{
+                width: "100%",
+                marginBottom: 10,
+                padding: 10,
+                borderRadius: 6,
+                border: "1px solid #475569",
+                background: "#0f172a",
+                color: "white",
+              }}
+            />
+
+            <select
+              value={editingContract.company_id || ""}
+              onChange={(e) =>
+                setEditingContract({
+                  ...editingContract,
+                  company_id: e.target.value,
+                })
+              }
+              style={{
+                width: "100%",
+                marginBottom: 10,
+                padding: 10,
+                borderRadius: 6,
+                border: "1px solid #475569",
+                background: "#0f172a",
+                color: "white",
+              }}
+            >
+              <option value="">Şirkət seç</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+
+            <input
+              type="date"
+              value={editingContract.start_date}
+              onChange={(e) =>
+                setEditingContract({
+                  ...editingContract,
+                  start_date: e.target.value,
+                })
+              }
+              style={{
+                width: "100%",
+                marginBottom: 10,
+                padding: 10,
+                borderRadius: 6,
+                border: "1px solid #475569",
+                background: "#0f172a",
+                color: "white",
+              }}
+            />
+
+            <input
+              type="date"
+              value={editingContract.end_date}
+              onChange={(e) =>
+                setEditingContract({
+                  ...editingContract,
+                  end_date: e.target.value,
+                })
+              }
+              style={{
+                width: "100%",
+                marginBottom: 15,
+                padding: 10,
+                borderRadius: 6,
+                border: "1px solid #475569",
+                background: "#0f172a",
+                color: "white",
+              }}
+            />
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={updateContract}
+                style={{
+                  background: "#16a34a",
+                  color: "white",
+                  padding: "8px 14px",
+                  borderRadius: 6,
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                Save
+              </button>
+
+              <button
+                onClick={() => setEditingContract(null)}
+                style={{
+                  background: "#64748b",
+                  color: "white",
+                  padding: "8px 14px",
+                  borderRadius: 6,
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

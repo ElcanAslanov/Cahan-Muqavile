@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-
+import * as XLSX from "xlsx";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 type Contract = {
   id: string;
@@ -19,6 +21,12 @@ export default function DashboardPage() {
   const [contracts,setContracts] = useState<Contract[]>([])
   const [selectedCompany,setSelectedCompany] = useState<string | null>(null)
   const [search,setSearch] = useState("")
+
+  // ✅ SORT STATE
+  const [sortConfig,setSortConfig] = useState<{key: keyof Contract | null, direction:"asc"|"desc"}>({
+    key:null,
+    direction:"asc"
+  })
 
   async function loadContracts(){
 
@@ -44,12 +52,38 @@ export default function DashboardPage() {
 
   const companies = [...new Set(contracts.map(c=>c.company_name))]
 
-  const filteredContracts = contracts
-  .filter(c => !selectedCompany || c.company_name === selectedCompany)
-  .filter(c =>
-    c.counterparty.toLowerCase().includes(search.toLowerCase()) ||
-    c.company_name.toLowerCase().includes(search.toLowerCase())
-  )
+  // ✅ FILTER + SORT
+  const filteredContracts = useMemo(()=>{
+    let result = contracts
+      .filter(c => !selectedCompany || c.company_name === selectedCompany)
+      .filter(c =>
+        c.counterparty.toLowerCase().includes(search.toLowerCase()) ||
+        c.company_name.toLowerCase().includes(search.toLowerCase())
+      )
+
+    if(sortConfig.key){
+      result.sort((a,b)=>{
+        const aVal = a[sortConfig.key!] || ""
+        const bVal = b[sortConfig.key!] || ""
+
+        if(aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1
+        if(aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1
+        return 0
+      })
+    }
+
+    return result
+  },[contracts,selectedCompany,search,sortConfig])
+
+  function requestSort(key:keyof Contract){
+    let direction:"asc"|"desc" = "asc"
+
+    if(sortConfig.key === key && sortConfig.direction === "asc"){
+      direction = "desc"
+    }
+
+    setSortConfig({key,direction})
+  }
 
   function daysLeft(end:string){
     const endDate = new Date(end).getTime()
@@ -79,6 +113,45 @@ export default function DashboardPage() {
     }
   }
 
+  // ✅ EXCEL EXPORT
+  function exportExcel(){
+    const data = filteredContracts.map(c=>({
+      Şirkət: c.company_name,
+      Müqavilə: c.counterparty,
+      Başlanma: c.start_date,
+      Bitmə: c.end_date,
+      Yeniləmə: c.auto_renew ? "Bəli" : "Xeyr"
+    }))
+
+    const ws = XLSX.utils.json_to_sheet(data)
+    const wb = XLSX.utils.book_new()
+
+    XLSX.utils.book_append_sheet(wb,ws,"Contracts")
+    XLSX.writeFile(wb,"contracts.xlsx")
+  }
+
+  // ✅ PDF EXPORT
+  function exportPDF(){
+    const doc = new jsPDF()
+
+    const columns = ["Şirkət","Müqavilə","Başlanma","Bitmə","Yeniləmə"]
+
+    const rows = filteredContracts.map(c=>[
+      c.company_name,
+      c.counterparty,
+      c.start_date,
+      c.end_date,
+      c.auto_renew ? "Bəli" : "Xeyr"
+    ])
+
+    autoTable(doc,{
+      head:[columns],
+      body:rows
+    })
+
+    doc.save("contracts.pdf")
+  }
+
   return(
 
     <div
@@ -96,6 +169,12 @@ export default function DashboardPage() {
         <p style={{color:"black",fontSize:15}}>
            Müqavilələri filtr etmək üçün şirkət seçin
         </p>
+
+        {/* ✅ EXPORT BUTTONS */}
+        <div style={{marginTop:10, display:"flex", gap:10}}>
+          <button onClick={exportExcel} style={{background:"#16a34a",color:"white",padding:"6px 12px",borderRadius:6}}>Excel</button>
+          <button onClick={exportPDF} style={{background:"#dc2626",color:"white",padding:"6px 12px",borderRadius:6}}>PDF</button>
+        </div>
       </div>
 
       {/* SEARCH */}
@@ -199,10 +278,10 @@ export default function DashboardPage() {
 
           <thead>
             <tr style={{borderBottom:"1px solid #c4c4c4"}}>
-              <th style={thStyle}>Şirkət</th>
-              <th style={thStyle}>Müqavilə</th>
-              <th style={thStyle}>Başlanma</th>
-              <th style={thStyle}>Bitmə</th>
+              <th style={thStyle} onClick={()=>requestSort("company_name")}>Şirkət ↕</th>
+              <th style={thStyle} onClick={()=>requestSort("counterparty")}>Müqavilə ↕</th>
+              <th style={thStyle} onClick={()=>requestSort("start_date")}>Başlanma ↕</th>
+              <th style={thStyle} onClick={()=>requestSort("end_date")}>Bitmə ↕</th>
               <th style={thStyle}>Vaxtın Bitməsi</th>
               <th style={thStyle}>Yeniləmə</th>
               <th style={thStyle}>PDF</th>
@@ -260,66 +339,63 @@ export default function DashboardPage() {
     </div>
   )
 }
-
-/* ===== STYLES ===== */
-
 const thStyle = {
-  textAlign:"left" as const,
-  padding:"12px",
-  color:"#e6e6e6",
-  fontSize:14
+  textAlign: "left" as const,
+  padding: "12px",
+  color: "#e6e6e6",
+  fontSize: 14,
+  cursor: "pointer"
 }
-
 const tdStyle = {
-  padding:"12px",
-  color:"#e6e6e6",
-  fontSize:14
+  padding: "12px",
+  color: "#cbd5e1", 
+  fontSize: 14
 }
-
-const renewBadge = {
-  background:"linear-gradient(135deg,#22c55e,#16a34a)",
-  padding:"4px 10px",
-  borderRadius:20,
-  fontSize:12,
-  color:"white"
+const dangerBadge = { 
+  background: "#dc2626",
+  color: "white",
+  padding: "4px 8px",
+  borderRadius: 6,
+  fontSize: 12,
+  fontWeight: "bold" as const
 }
-
-const noRenewBadge = {
-  background:"#374151",
-  padding:"4px 10px",
-  borderRadius:20,
-  fontSize:12,
-  color:"#cbd5f5"
+const warningBadge = { 
+  background: "#f59e0b",
+  color: "white",
+  padding: "4px 8px",
+  borderRadius: 6,
+  fontSize: 12,
+  fontWeight: "bold" as const
 }
-
 const safeBadge = {
-  background:"#2563eb",
-  padding:"4px 10px",
-  borderRadius:20,
-  fontSize:12,
-  color:"white"
+  background: "#16a34a",
+  color: "white",
+  padding: "4px 8px",
+  borderRadius: 6,
+  fontSize: 12,
+  fontWeight: "bold" as const
 }
-
-const warningBadge = {
-  background:"#f59e0b",
-  padding:"4px 10px",
-  borderRadius:20,
-  fontSize:12,
-  color:"white"
+const renewBadge = {  
+  background: "#2563eb",
+  color: "white",
+  padding: "4px 8px",
+  borderRadius: 6,
+  fontSize: 12,
+  fontWeight: "bold" as const
 }
-
-const dangerBadge = {
-  background:"#ef4444",
-  padding:"4px 10px",
-  borderRadius:20,
-  fontSize:12,
-  color:"white"
+const noRenewBadge = {  
+  background: "#6b7280",
+  color: "white",
+  padding: "4px 8px",
+  borderRadius: 6,
+  fontSize: 12,
+  fontWeight: "bold" as const
 }
-
 const pdfBtn = {
-  background: "var(--primary)",
-  color:"white",
-  padding:"6px 10px",
-  borderRadius:6,
-  textDecoration:"none"
+  background: "#ef4444",
+  color: "white",
+  padding: "6px 12px",
+  borderRadius: 6,
+  fontSize: 12,
+  textDecoration: "none" as const
 }

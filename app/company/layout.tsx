@@ -69,14 +69,14 @@ export default function CompanyLayout({
   },[])
 
   if(loading){
-    return <p style={{padding:40}}>Loading...</p>
+    return <p style={{padding:40}}>Yüklənir...</p>
   }
 
   function linkStyle(href:string){
     const active = pathname === href
 
     return {
-      color:"black",
+      color:"white",
       textDecoration:"none",
       padding:"8px 14px",
       borderRadius:8,
@@ -123,27 +123,27 @@ export default function CompanyLayout({
           
 
         )}
-<Link href="/company/settings">⚙️ Settings</Link>
+<Link href="/company/settings">⚙️ Tənzimləmələr</Link>
         {!isMobile && (
 
-          <div style={{display:"flex",gap:10}}>
+          <div style={{display:"flex",gap:10, color:"white"}}>
 
             <Link href="/company" style={linkStyle("/company")}>
-              Dashboard
+             İdarəetmə paneli
             </Link>
 
             <Link
               href="/company/create-contract"
-              style={linkStyle("/company/create-contract")}
+              style={linkStyle("/company/create-contract")  }
             >
-              Create Contract
+              Müqavilə yarat
             </Link>
 
             <Link
               href="/company/archived"
               style={linkStyle("/company/archived")}
             >
-              Archived
+              Arxiv
             </Link>
 
           </div>
@@ -163,7 +163,7 @@ export default function CompanyLayout({
             fontSize:14
           }}
         >
-          Logout
+          Çıxış
         </button>
 
       </nav>
@@ -182,7 +182,7 @@ export default function CompanyLayout({
         >
 
           <Link href="/company" style={linkStyle("/company")} onClick={()=>setMenuOpen(false)}>
-            Dashboard
+           İdarəetmə paneli
           </Link>
 
           <Link
@@ -190,7 +190,7 @@ export default function CompanyLayout({
             style={linkStyle("/company/create-contract")}
             onClick={()=>setMenuOpen(false)}
           >
-            Create Contract
+            Müqavilə yarat
           </Link>
 
           <Link
@@ -198,7 +198,7 @@ export default function CompanyLayout({
             style={linkStyle("/company/archived")}
             onClick={()=>setMenuOpen(false)}
           >
-            Archived
+            Arxiv
           </Link>
 
         </div>

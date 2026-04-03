@@ -104,6 +104,7 @@ export async function POST(req: Request) {
           can_create: p.can_create || false,
           can_delete: p.can_delete || false,
           can_archive: p.can_archive || false,
+          can_edit: p.can_edit || false,
         }));
 
       if (rows.length > 0) {

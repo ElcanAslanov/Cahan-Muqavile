@@ -137,7 +137,7 @@ export default function CreateContract() {
         <h1 style={titleStyle}>Create Contract</h1>
 
         <input
-          placeholder="Counterparty"
+          placeholder="Şirkət adı "
           value={counterparty}
           onChange={(e) => setCounterparty(e.target.value)}
           style={inputStyle}
@@ -160,8 +160,16 @@ export default function CreateContract() {
           style={inputStyle}
         />
 
-        <input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+        <input
+          type="file"
+          id="fileUpload"
+          onChange={(e) => setFile(e.target.files?.[0] || null)}
+          style={{ display: "none"  }}
+        />
 
+        <label htmlFor="fileUpload" style={{ cursor: "pointer" ,  margin:"20px"}}>
+          Fayl seç
+        </label>
         <button onClick={createContract} style={buttonStyle}>
           Create Contract
         </button>
@@ -171,8 +179,8 @@ export default function CreateContract() {
 }
 
 /* styles untouched */
-const pageStyle = { minHeight: "100vh", display: "flex", justifyContent: "center", alignItems: "center", background: "linear-gradient(180deg,#234C6A,#456882)" };
+const pageStyle = { minHeight: "100vh", display: "flex", justifyContent: "center", alignItems: "center", background: "#111A2C" };
 const cardStyle = { width: "100%", maxWidth: "520px", background: "#1e293b", padding: "30px", borderRadius: "16px" };
 const titleStyle = { fontSize: "24px", color: "white" };
-const inputStyle = { width: "100%", padding: "10px", marginBottom: "10px" };
-const buttonStyle = { background: "#3b82f6", color: "white", padding: "12px" };
+const inputStyle = { width: "100%", padding: "10px", background: "#1E293B", marginBottom: "10px" };
+const buttonStyle = { background: "#3b82f6", color: "white", padding: "12px"};

@@ -11,6 +11,8 @@ export default function UsersPage() {
 
   const [permissions, setPermissions] = useState<any[]>([]);
 
+  const [editingUser, setEditingUser] = useState<any>(null);
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -40,6 +42,7 @@ export default function UsersPage() {
         can_create: false,
         can_delete: false,
         can_archive: false,
+        can_edit: false,
       }));
 
       setPermissions(initial);
@@ -60,12 +63,13 @@ export default function UsersPage() {
           perms.map((p) =>
             p.company_id === id
               ? {
-                  ...p,
-                  can_read: false,
-                  can_create: false,
-                  can_delete: false,
-                  can_archive: false,
-                }
+                ...p,
+                can_read: false,
+                can_create: false,
+                can_delete: false,
+                can_archive: false,
+                can_edit: false,
+              }
               : p
           )
         );
@@ -172,9 +176,41 @@ export default function UsersPage() {
     loadUsers();
     loadCompanies();
   }, []);
+  async function updateUser() {
+    if (!editingUser) return;
+
+    const res = await fetch("/api/update-user", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        user_id: editingUser.id,
+        full_name: editingUser.full_name,
+        role: editingUser.role,
+        company_ids: selectedCompanies,
+        permissions,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      alert(data.error || "Update error");
+      return;
+    }
+
+    alert("User updated");
+
+    setEditingUser(null);
+    loadUsers();
+  }
+  function openEditUser(user: any) {
+    setEditingUser(user);
+  }
 
   return (
-    <div  className="min-h-screen  text-black p-6">
+    <div className="min-h-screen  text-black p-6">
       <h1 className="text-2xl font-bold mb-6">Users</h1>
 
       <div className="bg-white/5 p-4 rounded-xl mb-6 space-y-3 max-w-xl">
@@ -245,7 +281,8 @@ export default function UsersPage() {
                 <th className="text-left">Baxmaq</th>
                 <th className="text-left">Yaratmaq</th>
                 <th className="text-left">Silmək</th>
-                <th className="text-left">Arxivləşdirmək</th>
+                <th className="text-left">Arxiv</th>
+                <th className="text-left">Redaktə</th>
               </tr>
             </thead>
 
@@ -309,6 +346,16 @@ export default function UsersPage() {
                       }
                     />
                   </td>
+                  <td>
+                    <input
+                      type="checkbox"
+                      disabled={!selectedCompanies.includes(c.id)}
+                      checked={permissions[i].can_edit}
+                      onChange={(e) =>
+                        updatePermission(i, "can_edit", e.target.checked)
+                      }
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -319,7 +366,7 @@ export default function UsersPage() {
           onClick={addUser}
           className="bg-blue-600 text-white px-4 py-2 rounded w-full"
         >
-        Əlavə et
+          Əlavə et
         </button>
       </div>
 
@@ -348,31 +395,229 @@ export default function UsersPage() {
           onClick={changePassword}
           className="bg-green-600 text-white px-4 py-2 rounded w-full"
         >
-         Parolu dəyiş
+          Parolu dəyiş
         </button>
       </div>
 
       <div className="grid gap-3">
-        {users.map((user) => (
+  {users.map((user) => (
+    <div
+      key={user.id}
+      className="bg-gray-800 text-white p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center"
+    >
+      <div>
+        <div className="font-semibold">{user.full_name}</div>
+        <div className="text-sm text-gray-400">{user.email}</div>
+        <div className="text-xs text-blue-400">{user.role}</div>
+      </div>
+
+      {/* 🔥 BUTTONLARI BUNA SAL */}
+      <div className="flex gap-2 mt-3 sm:mt-0">
+        <button
+          onClick={() => deleteUser(user.id)}
+          className="bg-red-600 px-3 py-1 rounded"
+        >
+          Sil
+        </button>
+
+        <button
+          onClick={() => openEditUser(user)}
+          className="bg-blue-600 px-3 py-1 rounded"
+        >
+          Edit
+        </button>
+      </div>
+    </div>
+  ))}
+</div>
+      {editingUser && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background: "rgba(0,0,0,0.6)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 999,
+          }}
+        >
           <div
-            key={user.id}
-            className="bg-gray-800 text-white p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center"
+            style={{
+              background: "var(--bg-card)",
+              padding: 25,
+              color: "white",
+              borderRadius: 12,
+              width: 500,
+              maxHeight: "90vh",
+              overflowY: "auto",
+            }}
           >
-            <div>
-              <div className="font-semibold">{user.full_name}</div>
-              <div className="text-sm text-gray-400">{user.email}</div>
-              <div className="text-xs text-blue-400">{user.role}</div>
+            <h2>Edit User</h2>
+
+            {/* NAME */}
+            <input
+              value={editingUser.full_name}
+              onChange={(e) =>
+                setEditingUser({
+                  ...editingUser,
+                  full_name: e.target.value,
+                })
+              }
+              placeholder="Full name"
+              style={{ width: "100%", padding: 10, marginBottom: 10,  }}
+            />
+
+            {/* EMAIL (readonly edə bilərsən) */}
+            <input
+              value={editingUser.email}
+              disabled
+              style={{ width: "100%", padding: 10, marginBottom: 10 }}
+            />
+
+            {/* ROLE */}
+            <select
+              value={editingUser.role}
+              onChange={(e) =>
+                setEditingUser({
+                  ...editingUser,
+                  role: e.target.value,
+                })
+              }
+              style={{ width: "100%", padding: 10, marginBottom: 10, background: "var(--bg-card)", color: "white" }}
+            >
+              <option value="ADMIN">ADMIN</option>
+              <option value="COMPANY_MANAGER">COMPANY_MANAGER</option>
+              <option value="HOLDING_MANAGER">HOLDING_MANAGER</option>
+              <option value="ACCOUNTANT">ACCOUNTANT</option>
+            </select>
+
+            {/* COMPANY SELECT */}
+            <div style={{ marginBottom: 10 }}>
+              <div>Şirkət seç</div>
+
+              {companies.map((c) => (
+                <label key={c.id} style={{ display: "block" }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedCompanies.includes(c.id)}
+                    onChange={() => toggleCompany(c.id)}
+                  />{" "}
+                  {c.name}
+                </label>
+              ))}
             </div>
 
-            <button
-              onClick={() => deleteUser(user.id)}
-              className="mt-3 sm:mt-0 bg-red-600 px-3 py-1 rounded"
-            >
-              Sil
-            </button>
+            {/* PERMISSIONS */}
+            <table style={{ width: "100%", marginTop: 10 }}>
+              <thead>
+                <tr>
+                  <th>Şirkət</th>
+                  <th>View</th>
+                  <th>Create</th>
+                  <th>Delete</th>
+                  <th>Archive</th>
+                  <th>Edit</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {companies.map((c, i) => (
+                  <tr key={c.id}>
+                    <td>{c.name}</td>
+
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={!!permissions[i]?.can_view}
+                        disabled={!selectedCompanies.includes(c.id)}
+                        onChange={(e) =>
+                          updatePermission(i, "can_view", e.target.checked)
+                        }
+                      />
+                    </td>
+
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={permissions[i].can_create}
+                        disabled={!selectedCompanies.includes(c.id)}
+                        onChange={(e) =>
+                          updatePermission(i, "can_create", e.target.checked)
+                        }
+                      />
+                    </td>
+
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={permissions[i].can_delete}
+                        disabled={!selectedCompanies.includes(c.id)}
+                        onChange={(e) =>
+                          updatePermission(i, "can_delete", e.target.checked)
+                        }
+                      />
+                    </td>
+
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={permissions[i].can_archive}
+                        disabled={!selectedCompanies.includes(c.id)}
+                        onChange={(e) =>
+                          updatePermission(i, "can_archive", e.target.checked)
+                        }
+                      />
+                    </td>
+
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={permissions[i].can_edit}
+                        disabled={!selectedCompanies.includes(c.id)}
+                        onChange={(e) =>
+                          updatePermission(i, "can_edit", e.target.checked)
+                        }
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {/* BUTTONS */}
+            <div style={{ display: "flex", gap: 10, marginTop: 15 }}>
+              <button
+                onClick={updateUser}
+                style={{
+                  background: "var(--primary)",
+                  color: "white",
+                  padding: "8px 12px",
+                  borderRadius: "6px",
+                  border: "none",
+                }}
+              >
+                Save
+              </button>
+
+              <button
+                onClick={() => setEditingUser(null)}
+                style={{
+                  background: "#ccc",
+                  padding: "8px 12px",
+                  borderRadius: "6px",
+                  border: "none",
+                }}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
