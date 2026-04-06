@@ -188,7 +188,7 @@ export default function CompanyDashboard() {
   const exportToExcel = () => {
     const dataToExport = sortedAndFilteredContracts.map(c => ({
       "Şirkət": c.company_name,
-      "Kontragent": c.counterparty,
+      "Müqavilə": c.counterparty,
       "Başlama": formatDate(c.start_date),
       "Bitmə": formatDate(c.end_date),
       "Yenilənmə": c.auto_renew ? "Bəli" : "Xeyr"
