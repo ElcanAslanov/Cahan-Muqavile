@@ -104,7 +104,7 @@ export default function HoldingLayout({
             whiteSpace: "nowrap"
           }}
         >
-          Holding Contracts
+          Şirkət müqavilələri 
         </h1>
 
         {/* LOGOUT BUTTON */}

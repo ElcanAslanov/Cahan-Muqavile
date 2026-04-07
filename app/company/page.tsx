@@ -20,7 +20,8 @@ type Contract = {
 export default function CompanyDashboard() {
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
+  // const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
+  const [selectedCompanies, setSelectedCompanies] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [permissions, setPermissions] = useState<any[]>([]);
   const [editingContract, setEditingContract] = useState<any>(null);
@@ -214,7 +215,10 @@ export default function CompanyDashboard() {
   // FILTRLEME VE SIRALAMA MENTIQI
   const sortedAndFilteredContracts = useMemo(() => {
     let result = contracts
-      .filter((c) => !selectedCompany || c.company_name === selectedCompany)
+      .filter((c) => {
+        if (selectedCompanies.length === 0) return true;
+        return selectedCompanies.includes(c.company_name);
+      })
       .filter((c) =>
         c.counterparty.toLowerCase().includes(search.toLowerCase()) ||
         c.company_name.toLowerCase().includes(search.toLowerCase())
@@ -230,7 +234,7 @@ export default function CompanyDashboard() {
       });
     }
     return result;
-  }, [contracts, selectedCompany, search, sortConfig]);
+  }, [contracts, selectedCompanies, search, sortConfig]);
 
   const requestSort = (key: keyof Contract) => {
     let direction: 'asc' | 'desc' = 'asc';
@@ -245,7 +249,7 @@ export default function CompanyDashboard() {
   }
 
   return (
-    <div style={pageStyle} onClick={() => setSelectedCompany(null)}>
+    <div style={pageStyle} onClick={() => setSelectedCompanies([])}>
       <div style={headerWrap}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "20px" }}>
           <div>
@@ -275,13 +279,22 @@ export default function CompanyDashboard() {
         <div style={companyGrid}>
           {companies.map((company) => {
             const count = contracts.filter((c) => c.company_name === company).length;
-            const isActive = selectedCompany === company;
+            const isActive = selectedCompanies.includes(company);
             return (
               <div
                 key={company}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setSelectedCompany(isActive ? null : company);
+
+                  setSelectedCompanies((prev) => {
+                    if (prev.includes(company)) {
+                      // çıxart
+                      return prev.filter((c) => c !== company);
+                    } else {
+                      // əlavə et
+                      return [...prev, company];
+                    }
+                  });
                 }}
                 style={{
                   ...companyCardBase,
@@ -313,7 +326,12 @@ export default function CompanyDashboard() {
                   <th style={{ ...thStyle, cursor: "pointer" }} onClick={() => requestSort("end_date")}>Bitmə ↕</th>
                   <th style={thStyle}>Status</th>
                   <th style={thStyle}>Yeniləmə</th>
-                  <th style={thStyle}>Sənəd</th>
+                  <th
+                    style={{ ...thStyle, cursor: "pointer" }}
+                    onClick={() => requestSort("file_url")}
+                  >
+                    Sənəd ↕
+                  </th>
                   <th style={thStyle}>Əməliyyatlar</th>
                 </tr>
               </thead>
@@ -610,7 +628,7 @@ function expiryBadge(days: number) {
 }
 
 /* STYLES */
-const pageStyle = { minHeight: "100vh", padding: "30px 20px", background: "linear-gradient(180deg,#0f172a,#1e293b)", color: "white" };
+const pageStyle = { minHeight: "100vh", padding: "30px 20px", background: "linear-gradient(180deg,#0f172a,#1e293b)", color: "white", borderRadius: "16px" };
 const headerWrap = { marginBottom: "30px" };
 const titleStyle = { margin: 0, fontSize: "28px", fontWeight: 700 };
 const subtitleStyle = { marginTop: "6px", color: "#94a3b8", fontSize: "14px" };
@@ -642,7 +660,7 @@ const inputStyle = {
   padding: "10px",
   border: "1px solid #ccc",
   borderRadius: "6px",
-   background: "var(--bg-card)",
+  background: "var(--bg-card)",
   color: "white"
 };
 

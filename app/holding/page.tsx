@@ -18,11 +18,12 @@ type Contract = {
 
 export default function HoldingDashboard() {
   const [contracts, setContracts] = useState<Contract[]>([]);
-  const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
+  // const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
+  const [selectedCompanies, setSelectedCompanies] = useState<string[]>([]);
   const [search, setSearch] = useState("");
-  
+
   // SIRALAMA UCUN STATE
-  const [sortConfig, setSortConfig] = useState<{key: keyof Contract | null, direction: 'asc' | 'desc'}>({ key: null, direction: 'asc' });
+  const [sortConfig, setSortConfig] = useState<{ key: keyof Contract | null, direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
 
   async function loadContracts() {
     const { data, error } = await supabase
@@ -84,7 +85,10 @@ export default function HoldingDashboard() {
   // SIRALAMA VE FILTRLEME MENTIQI (useMemo ile)
   const sortedAndFilteredContracts = useMemo(() => {
     let result = contracts
-      .filter((c) => !selectedCompany || c.company_name === selectedCompany)
+      .filter((c) => {
+        if (selectedCompanies.length === 0) return true;
+        return selectedCompanies.includes(c.company_name);
+      })
       .filter((c) =>
         c.counterparty.toLowerCase().includes(search.toLowerCase()) ||
         c.company_name.toLowerCase().includes(search.toLowerCase())
@@ -100,7 +104,7 @@ export default function HoldingDashboard() {
       });
     }
     return result;
-  }, [contracts, selectedCompany, search, sortConfig]);
+  }, [contracts, selectedCompanies, search, sortConfig]);
 
   const requestSort = (key: keyof Contract) => {
     let direction: 'asc' | 'desc' = 'asc';
@@ -124,16 +128,18 @@ export default function HoldingDashboard() {
   }
 
   function toggleCompany(company: string) {
-    if (selectedCompany === company) {
-      setSelectedCompany(null);
-    } else {
-      setSelectedCompany(company);
-    }
+    setSelectedCompanies((prev) => {
+      if (prev.includes(company)) {
+        return prev.filter((c) => c !== company);
+      } else {
+        return [...prev, company];
+      }
+    });
   }
 
   return (
     <div
-      onClick={() => setSelectedCompany(null)}
+      onClick={() => setSelectedCompanies([])}
       style={{
         minHeight: "100vh",
         padding: "30px 20px",
@@ -143,16 +149,16 @@ export default function HoldingDashboard() {
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 25 }}>
-        <p style={{ color: "#f1f1f1", fontSize: 15, margin: 0 }}>Select company to filter contracts</p>
+        <p style={{ color: "#f1f1f1", fontSize: 15, margin: 0 }}>Şirkət müqavilələri filtiri</p>
         <div style={{ display: "flex", gap: "10px" }}>
-           <button onClick={(e) => { e.stopPropagation(); exportToExcel(); }} style={exportBtn}>Excel</button>
-           <button onClick={(e) => { e.stopPropagation(); exportToPDF(); }} style={exportBtn}>PDF</button>
+          <button onClick={(e) => { e.stopPropagation(); exportToExcel(); }} style={exportBtn}>Excel</button>
+          <button onClick={(e) => { e.stopPropagation(); exportToPDF(); }} style={exportBtn}>PDF</button>
         </div>
       </div>
 
       <div style={{ marginBottom: 30 }}>
         <input
-          placeholder="Search contracts..."
+          placeholder="Müqavilələri axtar..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           onClick={(e) => e.stopPropagation()}
@@ -163,7 +169,7 @@ export default function HoldingDashboard() {
       <div style={companyGridStyle}>
         {companies.map((company) => {
           const count = contracts.filter((c) => c.company_name === company).length;
-          const active = selectedCompany === company;
+          const active = selectedCompanies.includes(company);
 
           return (
             <div
@@ -181,7 +187,7 @@ export default function HoldingDashboard() {
               }}
             >
               <h3 style={{ fontSize: 16, marginBottom: 8, color: "#e6e6e6", margin: 0 }}>{company}</h3>
-              <p style={{ color: "#cbd5e1", fontSize: 14, margin: "8px 0 0 0" }}>{count} contracts</p>
+              <p style={{ color: "#cbd5e1", fontSize: 14, margin: "8px 0 0 0" }}>{count} Müqavilə</p>
             </div>
           );
         })}
@@ -189,20 +195,26 @@ export default function HoldingDashboard() {
 
       <div style={contentContainerStyle}>
         <h2 style={{ marginBottom: 20, color: "#e6e6e6", fontSize: 20 }}>
-          {selectedCompany ? `${selectedCompany} Contracts` : "All Contracts"}
+          {selectedCompanies ? `${selectedCompanies} Müqavilələr` : "All Contracts"}
         </h2>
 
         <div className="desktop-table">
           <table style={tableStyle}>
             <thead>
               <tr style={{ borderBottom: "1px solid #c4c4c4" }}>
-                <th style={{...thStyle, cursor: "pointer"}} onClick={() => requestSort("company_name")}>Company</th>
-                <th style={{...thStyle, cursor: "pointer"}} onClick={() => requestSort("counterparty")}>Counterparty</th>
-                <th style={{...thStyle, cursor: "pointer"}} onClick={() => requestSort("start_date")}>Start</th>
-                <th style={{...thStyle, cursor: "pointer"}} onClick={() => requestSort("end_date")}>End</th>
-                <th style={thStyle}>Expiry</th>
-                <th style={thStyle}>Renew</th>
-                <th style={thStyle}>PDF</th>
+                <th style={{ ...thStyle, cursor: "pointer" }} onClick={() => requestSort("company_name")}>Şirkət ↕</th>
+                <th style={{ ...thStyle, cursor: "pointer" }} onClick={() => requestSort("counterparty")}>Müqavilə ↕
+                </th>
+                <th style={{ ...thStyle, cursor: "pointer" }} onClick={() => requestSort("start_date")}>Başlama ↕</th>
+                <th style={{ ...thStyle, cursor: "pointer" }} onClick={() => requestSort("end_date")}>Bitmə ↕</th>
+                <th style={thStyle}>Aktiv</th>
+                <th style={thStyle}>Yeniləmə</th>
+                <th
+                  style={{ ...thStyle, cursor: "pointer" }}
+                  onClick={() => requestSort("file_url")}
+                >
+                  Sənəd ↕
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -251,7 +263,7 @@ export default function HoldingDashboard() {
                   {expiryBadge(days)}
                 </div>
                 <h3 style={{ color: "white", fontSize: 16, margin: "0 0 10px 0" }}>{c.counterparty}</h3>
-                
+
                 <div style={{ display: "flex", gap: "20px", marginBottom: 12 }}>
                   <div>
                     <p style={mobileLabelStyle}>Start Date</p>
