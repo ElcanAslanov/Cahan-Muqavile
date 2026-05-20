@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, type CSSProperties } from "react";
 import { supabase } from "@/lib/supabase";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
@@ -17,390 +17,1067 @@ type Contract = {
 };
 
 export default function DashboardPage() {
+  const [contracts, setContracts] = useState<Contract[]>([]);
+  const [selectedCompanies, setSelectedCompanies] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
 
-  const [contracts, setContracts] = useState<Contract[]>([])
-  const [selectedCompanies, setSelectedCompanies] = useState<string[]>([])
-  const [search, setSearch] = useState("")
-
-  // ✅ SORT STATE
-  const [sortConfig, setSortConfig] = useState<{ key: keyof Contract | null, direction: "asc" | "desc" }>({
+  const [sortConfig, setSortConfig] = useState<{
+    key: keyof Contract | null;
+    direction: "asc" | "desc";
+  }>({
     key: null,
-    direction: "asc"
-  })
+    direction: "asc",
+  });
 
   async function loadContracts() {
-
     const { data, error } = await supabase
       .from("contracts")
       .select("*")
       .eq("status", "active")
-      .order("created_at", { ascending: false })
+      .order("created_at", { ascending: false });
 
     if (error) {
-      console.log(error)
-      return
+      console.log(error);
+      return;
     }
 
     if (data) {
-      setContracts(data)
+      setContracts(data);
     }
   }
 
   useEffect(() => {
-    loadContracts()
-  }, [])
+    loadContracts();
+  }, []);
 
-  const companies = [...new Set(contracts.map(c => c.company_name))]
+  const companies = [...new Set(contracts.map((c) => c.company_name))];
 
-  // ✅ FILTER + SORT
   const filteredContracts = useMemo(() => {
     let result = contracts
-      .filter(c => {
-        if (selectedCompanies.length === 0) return true
-        return selectedCompanies.includes(c.company_name)
+      .filter((c) => {
+        if (selectedCompanies.length === 0) return true;
+        return selectedCompanies.includes(c.company_name);
       })
-      .filter(c =>
-        c.counterparty.toLowerCase().includes(search.toLowerCase()) ||
-        c.company_name.toLowerCase().includes(search.toLowerCase())
-      )
+      .filter(
+        (c) =>
+          c.counterparty.toLowerCase().includes(search.toLowerCase()) ||
+          c.company_name.toLowerCase().includes(search.toLowerCase())
+      );
 
     if (sortConfig.key) {
       result.sort((a, b) => {
-        const aVal = a[sortConfig.key!] || ""
-        const bVal = b[sortConfig.key!] || ""
+        const aVal = a[sortConfig.key!] || "";
+        const bVal = b[sortConfig.key!] || "";
 
-        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1
-        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1
-        return 0
-      })
+        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
     }
 
-    return result
-  }, [contracts, selectedCompanies, search, sortConfig])
+    return result;
+  }, [contracts, selectedCompanies, search, sortConfig]);
 
   function requestSort(key: keyof Contract) {
-    let direction: "asc" | "desc" = "asc"
+    let direction: "asc" | "desc" = "asc";
 
     if (sortConfig.key === key && sortConfig.direction === "asc") {
-      direction = "desc"
+      direction = "desc";
     }
 
-    setSortConfig({ key, direction })
+    setSortConfig({ key, direction });
   }
 
   function daysLeft(end: string) {
-    const endDate = new Date(end).getTime()
-    const today = new Date().getTime()
-    const diff = endDate - today
-    return Math.floor(diff / (1000 * 60 * 60 * 24))
+    const endDate = new Date(end).getTime();
+    const today = new Date().getTime();
+    const diff = endDate - today;
+    return Math.floor(diff / (1000 * 60 * 60 * 24));
   }
 
   function expiryBadge(days: number) {
-
     if (days <= 7) {
-      return <span style={dangerBadge}>7 DAYS</span>
+      return <span style={dangerBadge}>7 GÜN</span>;
     }
 
     if (days <= 30) {
-      return <span style={warningBadge}>30 DAYS</span>
+      return <span style={warningBadge}>30 GÜN</span>;
     }
 
-    return <span style={safeBadge}>ACTIVE</span>
+    return <span style={safeBadge}>AKTİV</span>;
   }
 
   function toggleCompany(company: string) {
-    setSelectedCompanies(prev => {
+    setSelectedCompanies((prev) => {
       if (prev.includes(company)) {
-        return prev.filter(c => c !== company)
+        return prev.filter((c) => c !== company);
       } else {
-        return [...prev, company]
+        return [...prev, company];
       }
-    })
+    });
   }
 
-  // ✅ EXCEL EXPORT
   function exportExcel() {
-    const data = filteredContracts.map(c => ({
+    const data = filteredContracts.map((c) => ({
       Şirkət: c.company_name,
       Müqavilə: c.counterparty,
       Başlanma: c.start_date,
       Bitmə: c.end_date,
-      Yeniləmə: c.auto_renew ? "Bəli" : "Xeyr"
-    }))
+      Yeniləmə: c.auto_renew ? "Bəli" : "Xeyr",
+    }));
 
-    const ws = XLSX.utils.json_to_sheet(data)
-    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
 
-    XLSX.utils.book_append_sheet(wb, ws, "Contracts")
-    XLSX.writeFile(wb, "contracts.xlsx")
+    XLSX.utils.book_append_sheet(wb, ws, "Contracts");
+    XLSX.writeFile(wb, "contracts.xlsx");
   }
 
-  // ✅ PDF EXPORT
   function exportPDF() {
-    const doc = new jsPDF()
+    const doc = new jsPDF();
 
-    const columns = ["Şirkət", "Müqavilə", "Başlanma", "Bitmə", "Yeniləmə"]
+    const columns = ["Şirkət", "Müqavilə", "Başlanma", "Bitmə", "Yeniləmə"];
 
-    const rows = filteredContracts.map(c => [
+    const rows = filteredContracts.map((c) => [
       c.company_name,
       c.counterparty,
       c.start_date,
       c.end_date,
-      c.auto_renew ? "Bəli" : "Xeyr"
-    ])
+      c.auto_renew ? "Bəli" : "Xeyr",
+    ]);
 
     autoTable(doc, {
       head: [columns],
-      body: rows
-    })
+      body: rows,
+    });
 
-    doc.save("contracts.pdf")
+    doc.save("contracts.pdf");
   }
 
+  function sortIcon(key: keyof Contract) {
+    if (sortConfig.key !== key) return "↕";
+    return sortConfig.direction === "asc" ? "↑" : "↓";
+  }
+
+  const expiringSoonCount = contracts.filter(
+    (c) => daysLeft(c.end_date) <= 30
+  ).length;
+
+  const criticalCount = contracts.filter((c) => daysLeft(c.end_date) <= 7)
+    .length;
+
+  const autoRenewCount = contracts.filter((c) => c.auto_renew).length;
+  const pdfCount = contracts.filter((c) => c.file_url).length;
+
   return (
-
     <div
+      className="admin-dashboard-page"
       onClick={() => setSelectedCompanies([])}
-      style={{
-        minHeight: "100vh",
-        padding: "30px 20px",
-        background: "var(--bg-main)",
-        margin: "0 auto"
-      }}
+      style={pageStyle}
     >
+      {/* HERO */}
+      <section className="dashboard-hero" style={heroCard}>
+        <div style={heroGlowOne} />
+        <div style={heroGlowTwo} />
 
-      <div style={{ marginBottom: 25 }}>
-        <h1 style={{ color: "black", fontSize: 24 }}>İdarəetmə paneli</h1>
-        <p style={{ color: "black", fontSize: 15 }}>
-          Müqavilələri filtr etmək üçün şirkət seçin
-        </p>
+        <div className="dashboard-hero-content" style={heroContent}>
+          <div className="dashboard-hero-left" style={heroLeft}>
+            <div className="dashboard-eyebrow" style={eyebrow}>
+              <span style={eyebrowDot} />
+              Admin panel
+            </div>
 
-        {/* ✅ EXPORT BUTTONS */}
-        <div style={{ marginTop: 10, display: "flex", gap: 10 }}>
-          <button onClick={exportExcel} style={{ background: "#16a34a", color: "white", padding: "6px 12px", borderRadius: 6 }}>Excel</button>
-          <button onClick={exportPDF} style={{ background: "#dc2626", color: "white", padding: "6px 12px", borderRadius: 6 }}>PDF</button>
+            <h1 className="dashboard-title" style={titleStyle}>
+              İdarəetmə paneli
+            </h1>
+
+            <p className="dashboard-subtitle" style={subtitleStyle}>
+              Aktiv müqavilələri izləyin, şirkətlər üzrə filter edin, axtarın,
+              sıralayın və hesabat kimi ixrac edin.
+            </p>
+          </div>
+
+          <div className="dashboard-actions" style={heroActions}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                exportExcel();
+              }}
+              style={excelBtnStyle}
+              type="button"
+            >
+              📊 Excel
+            </button>
+
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                exportPDF();
+              }}
+              style={pdfExportBtnStyle}
+              type="button"
+            >
+              📄 PDF
+            </button>
+          </div>
         </div>
-      </div>
+      </section>
 
-      {/* SEARCH */}
-      <div style={{ marginBottom: 30 }}>
-        <input
-          placeholder="Müqavilələri axtar..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            width: "100%",
-            padding: "12px 14px",
-            borderRadius: 8,
-            border: "1px solid #334155",
-            background: "#485569",
-            color: "white",
-            fontSize: 14
-          }}
-        />
-      </div>
+      {/* STATS */}
+      <section className="dashboard-stats" style={statsGrid}>
+        <div style={statCard}>
+          <div style={statTop}>
+            <span style={statIconBlue}>📁</span>
+            <span style={statLabel}>Aktiv müqavilə</span>
+          </div>
+          <strong style={statValue}>{contracts.length}</strong>
+          <span style={statHint}>Sistemdə aktiv olan müqavilələr</span>
+        </div>
+
+        <div style={statCard}>
+          <div style={statTop}>
+            <span style={statIconGreen}>🏢</span>
+            <span style={statLabel}>Şirkətlər</span>
+          </div>
+          <strong style={statValue}>{companies.length}</strong>
+          <span style={statHint}>Müqaviləsi olan şirkətlər</span>
+        </div>
+
+        <div style={statCard}>
+          <div style={statTop}>
+            <span style={statIconOrange}>⏳</span>
+            <span style={statLabel}>30 günə bitən</span>
+          </div>
+          <strong style={statValue}>{expiringSoonCount}</strong>
+          <span style={statHint}>Bitmə tarixi yaxın olanlar</span>
+        </div>
+
+        <div style={statCard}>
+          <div style={statTop}>
+            <span style={statIconRed}>⚠️</span>
+            <span style={statLabel}>Kritik</span>
+          </div>
+          <strong style={statValue}>{criticalCount}</strong>
+          <span style={statHint}>7 gün və ya daha az qalanlar</span>
+        </div>
+      </section>
+
+      {/* TOOLBAR */}
+      <section className="dashboard-toolbar" style={toolbarCard}>
+        <div style={toolbarInfo}>
+          <h2 style={toolbarTitle}>Filter və axtarış</h2>
+          <p style={toolbarText}>
+            Şirkət kartlarını seçərək çoxlu filter tətbiq edə bilərsiniz.
+          </p>
+        </div>
+
+        <div className="dashboard-search-wrap" style={searchWrap}>
+          <span style={searchIcon}>⌕</span>
+
+          <input
+            placeholder="Müqavilələri axtar..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            style={searchInputStyle}
+          />
+        </div>
+      </section>
 
       {/* COMPANY CARDS */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill,minmax(180px,1fr))",
-          gap: 16,
-          marginBottom: 40
-        }}
-      >
-
-        {companies.map(company => {
-
-          const count = contracts.filter(c => c.company_name === company).length
-          const active = selectedCompanies.includes(company)
+      <section className="dashboard-company-grid" style={companyGrid}>
+        {companies.map((company) => {
+          const count = contracts.filter((c) => c.company_name === company).length;
+          const active = selectedCompanies.includes(company);
 
           return (
-
             <div
               key={company}
               onClick={(e) => {
-                e.stopPropagation()
-                toggleCompany(company)
+                e.stopPropagation();
+                toggleCompany(company);
               }}
               style={{
-                cursor: "pointer",
-                padding: 18,
-                borderRadius: 14,
-                background: active
-                  ? "linear-gradient(135deg,#6366f1,#4f46e5)"
-                  : "#1e293b",
-                border: active
-                  ? "2px solid #818cf8"
-                  : "1px solid #334155",
-                boxShadow: active
-                  ? "0 15px 35px rgba(99,102,241,0.35)"
-                  : "0 5px 15px rgba(0,0,0,0.25)",
-                transition: "all 0.25s ease",
-                transform: active ? "scale(1.03)" : "scale(1)"
+                ...companyCardBase,
+                ...(active ? companyCardActive : companyCardInactive),
               }}
             >
+              <div style={companyCardTop}>
+                <span style={companyAvatar}>
+                  {company?.trim().slice(0, 1).toUpperCase() || "Ş"}
+                </span>
 
-              <h3 style={{ fontSize: 16, marginBottom: 8, color: "#e6e6e6" }}>
-                {company}
-              </h3>
+                <span style={active ? selectedPill : normalPill}>
+                  {active ? "Seçildi" : "Şirkət"}
+                </span>
+              </div>
 
-              <p style={{ color: "#cbd5e1", fontSize: 14 }}>
-                {count} müqavilə
-              </p>
+              <h3 style={companyName}>{company}</h3>
 
+              <div style={companyFooter}>
+                <span style={companyCount}>{count}</span>
+                <span style={companyCountLabel}>müqavilə</span>
+              </div>
             </div>
-
-          )
+          );
         })}
-
-      </div>
+      </section>
 
       {/* TABLE */}
-      <div
-        style={{
-          background: "#1e293b",
-          border: "1px solid #334155",
-          boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
-          padding: 20,
-          borderRadius: 14,
-          overflowX: "auto"
-        }}
-      >
+      <section className="dashboard-table-card" style={contentContainerStyle}>
+        <div style={tableHeader}>
+          <div>
+            <h2 style={tableTitle}>
+              {selectedCompanies.length > 0
+                ? `Seçilmiş şirkətlər (${selectedCompanies.length})`
+                : "Bütün müqavilələr"}
+            </h2>
 
-        <h2 style={{ marginBottom: 20, color: "#e6e6e6", fontSize: 20 }}>
-          {selectedCompanies ? `${selectedCompanies} Contracts` : "Bütün müqavilələr"}
-        </h2>
+            <p style={tableSubtitle}>
+              Göstərilən nəticə: {filteredContracts.length} / {contracts.length} ·
+              PDF-i olan: {pdfCount} · Avto yenilənən: {autoRenewCount}
+            </p>
+          </div>
 
-        <table
-          style={{
-            width: "100%",
-            borderCollapse: "collapse",
-            minWidth: 650
-          }}
-        >
+          {selectedCompanies.length > 0 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedCompanies([]);
+              }}
+              style={clearFilterBtn}
+            >
+              Filteri təmizlə
+            </button>
+          )}
+        </div>
 
-          <thead>
-            <tr style={{ borderBottom: "1px solid #c4c4c4" }}>
-              <th style={thStyle} onClick={() => requestSort("company_name")}>Şirkət ↕</th>
-              <th style={thStyle} onClick={() => requestSort("counterparty")}>Müqavilə ↕</th>
-              <th style={thStyle} onClick={() => requestSort("start_date")}>Başlanma ↕</th>
-              <th style={thStyle} onClick={() => requestSort("end_date")}>Bitmə ↕</th>
-              <th style={thStyle}>Vaxtın Bitməsi</th>
-              <th style={thStyle}>Yeniləmə</th>
-              <th style={thStyle} onClick={() => requestSort("file_url")}> Sənəd  ↕ </th>
-            </tr>
-          </thead>
-
-          <tbody>
-
-            {filteredContracts.map(c => {
-
-              const days = daysLeft(c.end_date)
-
-              return (
-
-                <tr key={c.id} style={{ borderBottom: "1px solid #1f2937" }}>
-
-                  <td style={tdStyle}>{c.company_name}</td>
-                  <td style={tdStyle}>{c.counterparty}</td>
-                  <td style={tdStyle}>{c.start_date}</td>
-                  <td style={tdStyle}>{c.end_date}</td>
-
-                  <td style={tdStyle}>
-                    {expiryBadge(days)}
-                  </td>
-
-                  <td style={tdStyle}>
-                    {c.auto_renew ? (
-                      <span style={renewBadge}>🔄 Yeniləmə</span>
-                    ) : (
-                      <span style={noRenewBadge}>⛔ Yeniləmə yoxdur</span>
-                    )}
-                  </td>
-
-                  <td style={tdStyle}>
-                    {c.file_url ? (
-                      <a href={c.file_url} target="_blank" style={pdfBtn}>
-                        PDFə bax
-                      </a>
-                    ) : (
-                      <span>PDF yoxdur</span>
-                    )}
-                  </td>
-
+        {filteredContracts.length === 0 ? (
+          <div style={emptyBox}>
+            <div style={emptyIcon}>📭</div>
+            <h3 style={emptyTitle}>Müqavilə tapılmadı</h3>
+            <p style={emptyText}>
+              Axtarış sözünü dəyişin və ya şirkət filterlərini təmizləyin.
+            </p>
+          </div>
+        ) : (
+          <div style={tableWrap}>
+            <table style={tableStyle}>
+              <thead>
+                <tr style={theadRow}>
+                  <th style={thStyle} onClick={() => requestSort("company_name")}>
+                    Şirkət {sortIcon("company_name")}
+                  </th>
+                  <th style={thStyle} onClick={() => requestSort("counterparty")}>
+                    Müqavilə {sortIcon("counterparty")}
+                  </th>
+                  <th style={thStyle} onClick={() => requestSort("start_date")}>
+                    Başlanma {sortIcon("start_date")}
+                  </th>
+                  <th style={thStyle} onClick={() => requestSort("end_date")}>
+                    Bitmə {sortIcon("end_date")}
+                  </th>
+                  <th style={thStyle}>Vaxtın bitməsi</th>
+                  <th style={thStyle}>Yeniləmə</th>
+                  <th style={thStyle} onClick={() => requestSort("file_url")}>
+                    Sənəd {sortIcon("file_url")}
+                  </th>
                 </tr>
+              </thead>
 
-              )
-            })}
+              <tbody>
+                {filteredContracts.map((c) => {
+                  const days = daysLeft(c.end_date);
 
-          </tbody>
+                  return (
+                    <tr key={c.id} style={rowStyle}>
+                      <td style={tdStyle}>
+                        <strong style={strongText}>{c.company_name}</strong>
+                      </td>
+                      <td style={tdStyle}>{c.counterparty}</td>
+                      <td style={tdStyle}>
+                        <span style={datePill}>{c.start_date}</span>
+                      </td>
+                      <td style={tdStyle}>
+                        <span style={datePill}>{c.end_date}</span>
+                      </td>
+                      <td style={tdStyle}>{expiryBadge(days)}</td>
+                      <td style={tdStyle}>
+                        {c.auto_renew ? (
+                          <span style={renewBadge}>🔄 Yeniləmə</span>
+                        ) : (
+                          <span style={noRenewBadge}>⛔ Yeniləmə yoxdur</span>
+                        )}
+                      </td>
+                      <td style={tdStyle}>
+                        {c.file_url ? (
+                          <a href={c.file_url} target="_blank" style={pdfBtn}>
+                            PDFə bax
+                          </a>
+                        ) : (
+                          <span style={noPdfBadge}>PDF yoxdur</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
-        </table>
+      <style jsx>{`
+        .admin-dashboard-page,
+        .admin-dashboard-page * {
+          box-sizing: border-box;
+        }
 
-      </div>
+        @media (max-width: 900px) {
+          .dashboard-hero-content,
+          .dashboard-toolbar {
+            flex-direction: column !important;
+            align-items: stretch !important;
+          }
 
+          .dashboard-hero-left {
+            min-width: 0 !important;
+            flex: 1 1 auto !important;
+          }
+
+          .dashboard-actions {
+            width: 100% !important;
+            justify-content: stretch !important;
+          }
+
+          .dashboard-actions button {
+            flex: 1 !important;
+          }
+
+          .dashboard-stats {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+
+          .dashboard-search-wrap {
+            width: 100% !important;
+          }
+        }
+
+        @media (max-width: 560px) {
+          .admin-dashboard-page {
+            padding: 18px 12px 28px !important;
+          }
+
+          .dashboard-hero,
+          .dashboard-toolbar,
+          .dashboard-table-card {
+            border-radius: 20px !important;
+            padding: 16px 14px !important;
+          }
+
+          .dashboard-title {
+            font-size: 29px !important;
+          }
+
+          .dashboard-subtitle {
+            font-size: 14px !important;
+            line-height: 1.6 !important;
+          }
+
+          .dashboard-stats,
+          .dashboard-company-grid {
+            grid-template-columns: 1fr !important;
+          }
+
+          .dashboard-actions {
+            flex-direction: column !important;
+          }
+
+          .dashboard-actions button {
+            width: 100% !important;
+          }
+        }
+      `}</style>
     </div>
-  )
+  );
 }
-const thStyle = {
-  textAlign: "left" as const,
-  padding: "12px",
-  color: "#e6e6e6",
-  fontSize: 14,
-  cursor: "pointer"
-}
-const tdStyle = {
-  padding: "12px",
+
+/* STYLES */
+
+const pageStyle: CSSProperties = {
+  width: "100%",
+  minHeight: "100svh",
+  overflowX: "hidden",
+  padding: "26px clamp(14px, 3vw, 32px) 38px",
+  background:
+    "radial-gradient(circle at top left, rgba(56,189,248,0.18), transparent 28%), radial-gradient(circle at top right, rgba(99,102,241,0.16), transparent 28%), linear-gradient(135deg, #f3f7fb 0%, #eaf2fb 48%, #f8fafc 100%)",
+  color: "#0f172a",
+};
+
+const heroCard: CSSProperties = {
+  position: "relative",
+  overflow: "hidden",
+  borderRadius: 28,
+  padding: "28px clamp(20px, 4vw, 34px)",
+  marginBottom: 20,
+  background:
+    "linear-gradient(135deg, rgba(15,23,42,0.98), rgba(30,64,105,0.96) 52%, rgba(8,47,73,0.98))",
+  border: "1px solid rgba(148, 163, 184, 0.18)",
+  boxShadow: "0 24px 80px rgba(15, 23, 42, 0.24)",
+  color: "#fff",
+};
+
+const heroGlowOne: CSSProperties = {
+  position: "absolute",
+  width: 260,
+  height: 260,
+  borderRadius: "50%",
+  right: -70,
+  top: -90,
+  background: "rgba(56,189,248,0.28)",
+  filter: "blur(8px)",
+};
+
+const heroGlowTwo: CSSProperties = {
+  position: "absolute",
+  width: 220,
+  height: 220,
+  borderRadius: "50%",
+  left: "35%",
+  bottom: -150,
+  background: "rgba(99,102,241,0.24)",
+  filter: "blur(10px)",
+};
+
+const heroContent: CSSProperties = {
+  position: "relative",
+  zIndex: 1,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 22,
+  flexWrap: "wrap",
+};
+
+const heroLeft: CSSProperties = {
+  minWidth: 260,
+  flex: "1 1 520px",
+};
+
+const eyebrow: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 9,
+  padding: "7px 12px",
+  borderRadius: 999,
+  background: "rgba(255,255,255,0.09)",
+  border: "1px solid rgba(255,255,255,0.12)",
+  color: "#dbeafe",
+  fontSize: 13,
+  fontWeight: 800,
+  marginBottom: 14,
+};
+
+const eyebrowDot: CSSProperties = {
+  width: 8,
+  height: 8,
+  borderRadius: "50%",
+  background: "#38bdf8",
+  boxShadow: "0 0 0 5px rgba(56,189,248,0.15)",
+};
+
+const titleStyle: CSSProperties = {
+  margin: 0,
+  fontSize: "clamp(30px, 4vw, 44px)",
+  lineHeight: 1.08,
+  letterSpacing: "-0.055em",
+  fontWeight: 950,
+};
+
+const subtitleStyle: CSSProperties = {
+  margin: "14px 0 0",
+  maxWidth: 760,
   color: "#cbd5e1",
-  fontSize: 14
-}
-const dangerBadge = {
-  background: "#dc2626",
-  color: "white",
-  padding: "4px 8px",
-  borderRadius: 6,
+  fontSize: 15,
+  lineHeight: 1.7,
+};
+
+const heroActions: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: 12,
+  flexWrap: "wrap",
+};
+
+const excelBtnStyle: CSSProperties = {
+  border: "none",
+  background: "linear-gradient(135deg, #16a34a, #15803d)",
+  color: "#fff",
+  padding: "12px 16px",
+  borderRadius: 15,
+  cursor: "pointer",
+  fontSize: 14,
+  fontWeight: 950,
+  boxShadow: "0 16px 34px rgba(22,163,74,0.24)",
+};
+
+const pdfExportBtnStyle: CSSProperties = {
+  border: "none",
+  background: "linear-gradient(135deg, #dc2626, #b91c1c)",
+  color: "#fff",
+  padding: "12px 16px",
+  borderRadius: 15,
+  cursor: "pointer",
+  fontSize: 14,
+  fontWeight: 950,
+  boxShadow: "0 16px 34px rgba(220,38,38,0.22)",
+};
+
+/* STATS */
+
+const statsGrid: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gap: 14,
+  marginBottom: 20,
+};
+
+const statCard: CSSProperties = {
+  background: "rgba(255,255,255,0.88)",
+  border: "1px solid rgba(203,213,225,0.86)",
+  boxShadow: "0 18px 45px rgba(15,23,42,0.08)",
+  borderRadius: 22,
+  padding: 18,
+};
+
+const statTop: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  marginBottom: 14,
+};
+
+const statLabel: CSSProperties = {
+  color: "#475569",
+  fontSize: 13,
+  fontWeight: 850,
+};
+
+const statValue: CSSProperties = {
+  display: "block",
+  color: "#0f172a",
+  fontSize: 32,
+  lineHeight: 1,
+  letterSpacing: "-0.05em",
+  fontWeight: 950,
+  marginBottom: 8,
+};
+
+const statHint: CSSProperties = {
+  display: "block",
+  color: "#64748b",
   fontSize: 12,
-  fontWeight: "bold" as const
-}
-const warningBadge = {
-  background: "#f59e0b",
-  color: "white",
-  padding: "4px 8px",
-  borderRadius: 6,
+  lineHeight: 1.45,
+};
+
+const statIconBlue: CSSProperties = {
+  width: 36,
+  height: 36,
+  borderRadius: 14,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "#dbeafe",
+};
+
+const statIconGreen: CSSProperties = {
+  ...statIconBlue,
+  background: "#dcfce7",
+};
+
+const statIconOrange: CSSProperties = {
+  ...statIconBlue,
+  background: "#ffedd5",
+};
+
+const statIconRed: CSSProperties = {
+  ...statIconBlue,
+  background: "#fee2e2",
+};
+
+/* TOOLBAR */
+
+const toolbarCard: CSSProperties = {
+  // display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 18,
+  flexWrap: "wrap",
+  marginBottom: 18,
+  padding: 18,
+  borderRadius: 22,
+  background: "rgba(255,255,255,0.9)",
+  border: "1px solid rgba(203,213,225,0.88)",
+  boxShadow: "0 18px 45px rgba(15,23,42,0.07)",
+};
+
+const toolbarInfo: CSSProperties = {
+  minWidth: 240,
+  flex: "1 1 340px",
+};
+
+const toolbarTitle: CSSProperties = {
+  margin: 0,
+  color: "#0f172a",
+  fontSize: 18,
+  fontWeight: 950,
+  letterSpacing: "-0.035em",
+};
+
+const toolbarText: CSSProperties = {
+  margin: "6px 0 0",
+  color: "#64748b",
+  fontSize: 13,
+  lineHeight: 1.5,
+};
+
+const searchWrap: CSSProperties = {
+  flex: "1 1 420px",
+  minWidth: 260,
+  position: "relative",
+};
+
+const searchIcon: CSSProperties = {
+  position: "absolute",
+  left: 15,
+  top: "50%",
+  transform: "translateY(-50%)",
+  color: "#64748b",
+  fontSize: 19,
+  pointerEvents: "none",
+};
+
+const searchInputStyle: CSSProperties = {
+  width: "100%",
+  padding: "14px 16px 14px 44px",
+  borderRadius: 16,
+  border: "1px solid #cbd5e1",
+  background: "#fff",
+  color: "#0f172a",
+  fontSize: 14,
+  outline: "none",
+};
+
+/* COMPANY CARDS */
+
+const companyGrid: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+  gap: 16,
+  marginBottom: 20,
+};
+
+const companyCardBase: CSSProperties = {
+  padding: 18,
+  borderRadius: 22,
+  cursor: "pointer",
+  transition: "all 0.25s ease",
+  minHeight: 150,
+  display: "flex",
+  flexDirection: "column",
+  justifyContent: "space-between",
+};
+
+const companyCardActive: CSSProperties = {
+  background:
+    "linear-gradient(135deg, rgba(37,99,235,0.98), rgba(79,70,229,0.98))",
+  border: "1px solid rgba(255,255,255,0.35)",
+  boxShadow: "0 22px 48px rgba(37,99,235,0.30)",
+  transform: "translateY(-3px)",
+  color: "#fff",
+};
+
+const companyCardInactive: CSSProperties = {
+  background: "rgba(255,255,255,0.88)",
+  border: "1px solid rgba(203,213,225,0.92)",
+  boxShadow: "0 18px 44px rgba(15,23,42,0.07)",
+  color: "#0f172a",
+};
+
+const companyCardTop: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 10,
+  marginBottom: 16,
+};
+
+const companyAvatar: CSSProperties = {
+  width: 42,
+  height: 42,
+  borderRadius: 16,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "rgba(15,23,42,0.08)",
+  color: "inherit",
+  fontWeight: 950,
+};
+
+const selectedPill: CSSProperties = {
+  padding: "6px 10px",
+  borderRadius: 999,
+  background: "rgba(255,255,255,0.18)",
+  color: "#fff",
   fontSize: 12,
-  fontWeight: "bold" as const
-}
-const safeBadge = {
-  background: "#16a34a",
-  color: "white",
-  padding: "4px 8px",
-  borderRadius: 6,
+  fontWeight: 900,
+};
+
+const normalPill: CSSProperties = {
+  padding: "6px 10px",
+  borderRadius: 999,
+  background: "#f1f5f9",
+  color: "#475569",
   fontSize: 12,
-  fontWeight: "bold" as const
-}
-const renewBadge = {
-  background: "#2563eb",
-  color: "white",
-  padding: "4px 8px",
-  borderRadius: 6,
+  fontWeight: 900,
+};
+
+const companyName: CSSProperties = {
+  margin: 0,
+  color: "inherit",
+  fontSize: 16,
+  lineHeight: 1.35,
+  fontWeight: 900,
+};
+
+const companyFooter: CSSProperties = {
+  display: "flex",
+  alignItems: "baseline",
+  gap: 7,
+  marginTop: 14,
+};
+
+const companyCount: CSSProperties = {
+  fontSize: 28,
+  lineHeight: 1,
+  fontWeight: 950,
+};
+
+const companyCountLabel: CSSProperties = {
+  fontSize: 13,
+  opacity: 0.78,
+  fontWeight: 700,
+};
+
+/* TABLE */
+
+const contentContainerStyle: CSSProperties = {
+  background: "rgba(255,255,255,0.92)",
+  border: "1px solid rgba(203,213,225,0.9)",
+  boxShadow: "0 24px 70px rgba(15,23,42,0.09)",
+  padding: 18,
+  borderRadius: 26,
+};
+
+const tableHeader: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 14,
+  flexWrap: "wrap",
+  padding: "2px 2px 16px",
+};
+
+const tableTitle: CSSProperties = {
+  margin: 0,
+  color: "#0f172a",
+  fontSize: 21,
+  fontWeight: 950,
+};
+
+const tableSubtitle: CSSProperties = {
+  margin: "6px 0 0",
+  color: "#64748b",
+  fontSize: 13,
+};
+
+const clearFilterBtn: CSSProperties = {
+  border: "1px solid #cbd5e1",
+  background: "#fff",
+  color: "#334155",
+  padding: "10px 13px",
+  borderRadius: 14,
+  cursor: "pointer",
+  fontSize: 13,
+  fontWeight: 850,
+};
+
+const tableWrap: CSSProperties = {
+  width: "100%",
+  overflowX: "auto",
+  borderRadius: 18,
+  border: "1px solid #e2e8f0",
+};
+
+const tableStyle: CSSProperties = {
+  width: "100%",
+  borderCollapse: "separate",
+  borderSpacing: 0,
+  minWidth: 900,
+  background: "#fff",
+};
+
+const theadRow: CSSProperties = {
+  background: "#f8fafc",
+};
+
+const thStyle: CSSProperties = {
+  textAlign: "left",
+  padding: "14px",
+  color: "#475569",
   fontSize: 12,
-  fontWeight: "bold" as const
-}
-const noRenewBadge = {
-  background: "#6b7280",
-  color: "white",
-  padding: "4px 8px",
-  borderRadius: 6,
+  fontWeight: 950,
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
+  borderBottom: "1px solid #e2e8f0",
+  whiteSpace: "nowrap",
+  cursor: "pointer",
+};
+
+const rowStyle: CSSProperties = {
+  transition: "0.2s",
+};
+
+const tdStyle: CSSProperties = {
+  padding: "14px",
+  color: "#0f172a",
+  fontSize: 14,
+  borderBottom: "1px solid #eef2f7",
+  verticalAlign: "middle",
+};
+
+const strongText: CSSProperties = {
+  fontWeight: 850,
+  color: "#0f172a",
+};
+
+const datePill: CSSProperties = {
+  display: "inline-flex",
+  padding: "7px 10px",
+  borderRadius: 999,
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  color: "#334155",
+  fontSize: 13,
+  fontWeight: 800,
+  whiteSpace: "nowrap",
+};
+
+const dangerBadge: CSSProperties = {
+  background: "#fee2e2",
+  color: "#991b1b",
+  padding: "6px 11px",
+  borderRadius: 999,
   fontSize: 12,
-  fontWeight: "bold" as const
-}
-const pdfBtn = {
-  background: "#ef4444",
-  color: "white",
-  padding: "6px 12px",
-  borderRadius: 6,
+  fontWeight: 950,
+  whiteSpace: "nowrap",
+};
+
+const warningBadge: CSSProperties = {
+  background: "#ffedd5",
+  color: "#9a3412",
+  padding: "6px 11px",
+  borderRadius: 999,
   fontSize: 12,
-  textDecoration: "none" as const
-}
+  fontWeight: 950,
+  whiteSpace: "nowrap",
+};
+
+const safeBadge: CSSProperties = {
+  background: "#dcfce7",
+  color: "#166534",
+  padding: "6px 11px",
+  borderRadius: 999,
+  fontSize: 12,
+  fontWeight: 950,
+  whiteSpace: "nowrap",
+};
+
+const renewBadge: CSSProperties = {
+  background: "#dcfce7",
+  color: "#166534",
+  padding: "6px 11px",
+  borderRadius: 999,
+  fontSize: 12,
+  fontWeight: 950,
+  whiteSpace: "nowrap",
+};
+
+const noRenewBadge: CSSProperties = {
+  background: "#f1f5f9",
+  color: "#475569",
+  padding: "6px 11px",
+  borderRadius: 999,
+  fontSize: 12,
+  fontWeight: 950,
+  whiteSpace: "nowrap",
+};
+
+const noPdfBadge: CSSProperties = {
+  display: "inline-flex",
+  padding: "7px 10px",
+  borderRadius: 999,
+  background: "#f1f5f9",
+  color: "#64748b",
+  fontSize: 12,
+  fontWeight: 850,
+};
+
+const pdfBtn: CSSProperties = {
+  display: "inline-flex",
+  background: "linear-gradient(135deg, #3b82f6, #2563eb)",
+  color: "white",
+  padding: "8px 12px",
+  borderRadius: 12,
+  textDecoration: "none",
+  fontSize: 13,
+  fontWeight: 900,
+};
+
+/* EMPTY */
+
+const emptyBox: CSSProperties = {
+  padding: "46px 20px",
+  borderRadius: 20,
+  background: "#f8fafc",
+  border: "1px dashed #cbd5e1",
+  textAlign: "center",
+};
+
+const emptyIcon: CSSProperties = {
+  width: 58,
+  height: 58,
+  margin: "0 auto 14px",
+  borderRadius: 20,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "#f1f5f9",
+  fontSize: 28,
+};
+
+const emptyTitle: CSSProperties = {
+  margin: 0,
+  color: "#0f172a",
+  fontSize: 18,
+  fontWeight: 950,
+};
+
+const emptyText: CSSProperties = {
+  margin: "8px auto 0",
+  maxWidth: 430,
+  color: "#64748b",
+  fontSize: 14,
+};
