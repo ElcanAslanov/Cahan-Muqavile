@@ -15,24 +15,75 @@ type Contract = {
   end_date: string;
   file_url: string | null;
   auto_renew: boolean;
+  contract_direction: string | null;
+  contract_group: string | null;
 };
+
+type ContractDirection = {
+  id: string;
+  name: string;
+  code: string;
+  is_active: boolean;
+};
+
+type ContractGroup = {
+  id: string;
+  direction_id: string;
+  name: string;
+  code: string;
+  is_active: boolean;
+};
+
+type DirectionFilter = "ALL" | string;
+type GroupFilter = "ALL" | string;
 
 export default function CompanyDashboard() {
   const [contracts, setContracts] = useState<Contract[]>([]);
+  const [contractDirections, setContractDirections] = useState<ContractDirection[]>([]);
+  const [contractGroups, setContractGroups] = useState<ContractGroup[]>([]);
   const [loading, setLoading] = useState(true);
-  // const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
   const [selectedCompanies, setSelectedCompanies] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [permissions, setPermissions] = useState<any[]>([]);
   const [editingContract, setEditingContract] = useState<any>(null);
 
-  // SIRALAMA UCUN STATE
-  const [sortConfig, setSortConfig] = useState<{
-    key: keyof Contract | null;
-    direction: "asc" | "desc";
-  }>({ key: null, direction: "asc" });
+  const [directionFilter, setDirectionFilter] =
+    useState<DirectionFilter>("ALL");
+  const [groupFilter, setGroupFilter] = useState<GroupFilter>("ALL");
+
+  const [openFilterKey, setOpenFilterKey] = useState<keyof Contract | null>(
+    null
+  );
+
+  const [columnFilters, setColumnFilters] = useState<
+    Partial<Record<keyof Contract, string[]>>
+  >({});
+
+  async function loadContractSettings() {
+    const { data: directionData, error: directionError } = await supabase
+      .from("contract_directions")
+      .select("*")
+      .eq("is_active", true)
+      .order("created_at", { ascending: true });
+
+    const { data: groupData, error: groupError } = await supabase
+      .from("contract_groups")
+      .select("*")
+      .eq("is_active", true)
+      .order("created_at", { ascending: true });
+
+    if (directionError || groupError) {
+      alert("Müqavilə bölmə və qrupları yüklənmədi");
+      return;
+    }
+
+    setContractDirections(directionData || []);
+    setContractGroups(groupData || []);
+  }
 
   async function loadContracts() {
+    await loadContractSettings();
+
     const { data: userData } = await supabase.auth.getUser();
     const userId = userData.user?.id;
 
@@ -90,7 +141,7 @@ export default function CompanyDashboard() {
         return !(end < now && !c.auto_renew);
       });
 
-      setContracts(activeContracts);
+      setContracts(activeContracts as Contract[]);
     }
 
     setLoading(false);
@@ -101,7 +152,6 @@ export default function CompanyDashboard() {
 
     let fileUrl = editingContract.file_url;
 
-    // yeni file varsa upload et
     if (editingContract.newFile) {
       const fileName = `${Date.now()}-${editingContract.newFile.name}`;
 
@@ -126,6 +176,8 @@ export default function CompanyDashboard() {
         start_date: editingContract.start_date,
         end_date: editingContract.end_date,
         file_url: fileUrl,
+        contract_direction: editingContract.contract_direction || null,
+        contract_group: editingContract.contract_group || null,
       })
       .eq("id", editingContract.id);
 
@@ -140,7 +192,15 @@ export default function CompanyDashboard() {
   }
 
   function openEditModal(contract: any) {
-    setEditingContract(contract);
+    const directionCode = contract.contract_direction || contractDirections[0]?.code || "";
+    const groupCode =
+      contract.contract_group || getGroupsForDirection(directionCode)[0]?.code || "";
+
+    setEditingContract({
+      ...contract,
+      contract_direction: directionCode,
+      contract_group: groupCode,
+    });
   }
 
   useEffect(() => {
@@ -173,7 +233,6 @@ export default function CompanyDashboard() {
       return;
     }
 
-    // UI-dan da sil (çünki active list-də göstərirsən)
     setContracts((prev) => prev.filter((c) => c.id !== id));
   }
 
@@ -193,39 +252,119 @@ export default function CompanyDashboard() {
     return Math.floor(diff / (1000 * 60 * 60 * 24));
   }
 
+  function getDirectionLabel(value: string | null) {
+    if (!value) return "-";
+    return contractDirections.find((d) => d.code === value)?.name || value;
+  }
+
+  function getGroupLabel(value: string | null) {
+    if (!value) return "-";
+    return contractGroups.find((g) => g.code === value)?.name || value;
+  }
+
+  function getDirectionByCode(code: string | null) {
+    if (!code) return null;
+    return contractDirections.find((d) => d.code === code) || null;
+  }
+
+  function getGroupsForDirection(directionCode: string | null) {
+    const direction = getDirectionByCode(directionCode);
+    if (!direction) return [];
+    return contractGroups.filter((g) => g.direction_id === direction.id);
+  }
+
+  function getColumnValue(contract: Contract, key: keyof Contract) {
+    if (key === "contract_direction") return getDirectionLabel(contract.contract_direction);
+    if (key === "contract_group") return getGroupLabel(contract.contract_group);
+    if (key === "start_date" || key === "end_date") return formatDate(contract[key]);
+    if (key === "auto_renew") return contract.auto_renew ? "Bəli" : "Xeyr";
+    if (key === "file_url") return contract.file_url ? "PDF var" : "PDF yoxdur";
+
+    const value = contract[key];
+    return value === null || value === undefined || value === "" ? "-" : String(value);
+  }
+
+  function getAvailableColumnValues(key: keyof Contract) {
+    return Array.from(new Set(contracts.map((c) => getColumnValue(c, key))))
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, "az"));
+  }
+
+  function toggleColumnFilter(key: keyof Contract, value: string) {
+    setColumnFilters((prev) => {
+      const current = prev[key] || [];
+      const updated = current.includes(value)
+        ? current.filter((v) => v !== value)
+        : [...current, value];
+
+      const next = { ...prev };
+
+      if (updated.length === 0) {
+        delete next[key];
+      } else {
+        next[key] = updated;
+      }
+
+      return next;
+    });
+  }
+
+  function clearColumnFilter(key: keyof Contract) {
+    setColumnFilters((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }
+
+  function isColumnFilterActive(key: keyof Contract) {
+    return (columnFilters[key] || []).length > 0;
+  }
+
   const companies = [...new Set(contracts.map((c) => c.company_name))];
 
-  // FILTRLEME VE SIRALAMA MENTIQI
   const sortedAndFilteredContracts = useMemo(() => {
-    let result = contracts
+    return contracts
       .filter((c) => {
         if (selectedCompanies.length === 0) return true;
         return selectedCompanies.includes(c.company_name);
+      })
+      .filter((c) => {
+        if (directionFilter === "ALL") return true;
+        return c.contract_direction === directionFilter;
+      })
+      .filter((c) => {
+        if (directionFilter === "ALL" || groupFilter === "ALL") return true;
+        return c.contract_group === groupFilter;
+      })
+      .filter((c) => {
+        return Object.entries(columnFilters).every(([key, values]) => {
+          if (!values || values.length === 0) return true;
+          return values.includes(getColumnValue(c, key as keyof Contract));
+        });
       })
       .filter(
         (c) =>
           c.counterparty.toLowerCase().includes(search.toLowerCase()) ||
           c.company_name.toLowerCase().includes(search.toLowerCase())
       );
+  }, [
+    contracts,
+    selectedCompanies,
+    search,
+    directionFilter,
+    groupFilter,
+    columnFilters,
+    contractDirections,
+    contractGroups,
+  ]);
 
-    if (sortConfig.key) {
-      result.sort((a, b) => {
-        const aVal = a[sortConfig.key!] || "";
-        const bVal = b[sortConfig.key!] || "";
-        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
-        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
-        return 0;
-      });
-    }
-
-    return result;
-  }, [contracts, selectedCompanies, search, sortConfig]);
-
-  // --- EXPORT FUNKSIYALARI ---
   const exportToExcel = () => {
     const dataToExport = sortedAndFilteredContracts.map((c) => ({
       Şirkət: c.company_name,
       Müqavilə: c.counterparty,
+      Bölmə: getDirectionLabel(c.contract_direction),
+      Qrup: getGroupLabel(c.contract_group),
       Başlama: formatDate(c.start_date),
       Bitmə: formatDate(c.end_date),
       Yenilənmə: c.auto_renew ? "Bəli" : "Xeyr",
@@ -239,10 +378,21 @@ export default function CompanyDashboard() {
 
   const exportToPDF = () => {
     const doc = new jsPDF();
-    const tableColumn = ["Company", "Counterparty", "Start", "End", "Renew"];
+    const tableColumn = [
+      "Company",
+      "Counterparty",
+      "Direction",
+      "Group",
+      "Start",
+      "End",
+      "Renew",
+    ];
+
     const tableRows = sortedAndFilteredContracts.map((c) => [
       c.company_name,
       c.counterparty,
+      getDirectionLabel(c.contract_direction),
+      getGroupLabel(c.contract_group),
       formatDate(c.start_date),
       formatDate(c.end_date),
       c.auto_renew ? "Yes" : "No",
@@ -252,21 +402,6 @@ export default function CompanyDashboard() {
     doc.save("Sirket_Muqavileleri.pdf");
   };
 
-  const requestSort = (key: keyof Contract) => {
-    let direction: "asc" | "desc" = "asc";
-
-    if (sortConfig.key === key && sortConfig.direction === "asc") {
-      direction = "desc";
-    }
-
-    setSortConfig({ key, direction });
-  };
-
-  function sortIcon(key: keyof Contract) {
-    if (sortConfig.key !== key) return "↕";
-    return sortConfig.direction === "asc" ? "↑" : "↓";
-  }
-
   const expiringSoonCount = contracts.filter(
     (c) => daysLeft(c.end_date) <= 30
   ).length;
@@ -275,8 +410,20 @@ export default function CompanyDashboard() {
     .length;
 
   const autoRenewCount = contracts.filter((c) => c.auto_renew).length;
-
   const pdfCount = contracts.filter((c) => c.file_url).length;
+  const directionStats = contractDirections.map((direction) => ({
+    ...direction,
+    count: contracts.filter((c) => c.contract_direction === direction.code).length,
+  }));
+
+  function clearAllFilters() {
+    setSelectedCompanies([]);
+    setSearch("");
+    setDirectionFilter("ALL");
+    setGroupFilter("ALL");
+    setColumnFilters({});
+    setOpenFilterKey(null);
+  }
 
   if (loading) {
     return (
@@ -302,8 +449,7 @@ export default function CompanyDashboard() {
   }
 
   return (
-    <div style={pageStyle} onClick={() => setSelectedCompanies([])}>
-      {/* HERO */}
+    <div style={pageStyle} onClick={() => { setSelectedCompanies([]); setOpenFilterKey(null); }}>
       <section style={heroCard}>
         <div style={heroGlowOne} />
         <div style={heroGlowTwo} />
@@ -319,12 +465,11 @@ export default function CompanyDashboard() {
 
             <p style={subtitleStyle}>
               Sizə aid şirkətlər üzrə aktiv müqavilələri izləyin, axtarın,
-              sıralayın, ixrac edin və icazəniz varsa redaktə, silmə və arxiv
-              əməliyyatlarını icra edin.
+              sıralayın, bölmə və qrup üzrə filter edin, ixrac edin və icazəniz
+              varsa redaktə, silmə və arxiv əməliyyatlarını icra edin.
             </p>
           </div>
 
-          {/* EXPORT BUTONLARI */}
           <div style={heroActions}>
             <button
               onClick={(e) => {
@@ -353,27 +498,33 @@ export default function CompanyDashboard() {
         </div>
       </section>
 
-      {/* STATS */}
       <section style={statsGrid}>
         <div style={statCard}>
           <div style={statTop}>
             <span style={statIconBlue}>📁</span>
             <span style={statLabel}>Aktiv müqavilələr</span>
           </div>
-
           <strong style={statValue}>{contracts.length}</strong>
-
           <span style={statHint}>Hazırda aktiv siyahıda olan müqavilələr</span>
         </div>
+
+        {directionStats.map((direction) => (
+          <div key={direction.id} style={statCard}>
+            <div style={statTop}>
+              <span style={statIconPurple}>🏷️</span>
+              <span style={statLabel}>{direction.name}</span>
+            </div>
+            <strong style={statValue}>{direction.count}</strong>
+            <span style={statHint}>Bu bölməyə aid aktiv müqavilələr</span>
+          </div>
+        ))}
 
         <div style={statCard}>
           <div style={statTop}>
             <span style={statIconOrange}>⏳</span>
             <span style={statLabel}>30 günə bitən</span>
           </div>
-
           <strong style={statValue}>{expiringSoonCount}</strong>
-
           <span style={statHint}>Bitmə tarixi yaxın olan müqavilələr</span>
         </div>
 
@@ -382,9 +533,7 @@ export default function CompanyDashboard() {
             <span style={statIconRed}>⚠️</span>
             <span style={statLabel}>Kritik</span>
           </div>
-
           <strong style={statValue}>{criticalCount}</strong>
-
           <span style={statHint}>7 gün və ya daha az qalan müqavilələr</span>
         </div>
 
@@ -393,21 +542,16 @@ export default function CompanyDashboard() {
             <span style={statIconGreen}>🔁</span>
             <span style={statLabel}>Avto yenilənən</span>
           </div>
-
           <strong style={statValue}>{autoRenewCount}</strong>
-
           <span style={statHint}>Avtomatik yenilənmə seçilmiş müqavilələr</span>
         </div>
       </section>
 
-      {/* TOOLBAR */}
       <section style={toolbarCard}>
         <div style={toolbarInfo}>
           <h2 style={toolbarTitle}>Filter və axtarış</h2>
-
           <p style={toolbarText}>
-            Şirkət kartlarını seçərək çoxlu filter tətbiq edə bilərsiniz. Boş
-            sahəyə klik etdikdə filter təmizlənir.
+            Şirkət, bölmə, qrup və cədvəl sütunları üzrə Excel tipli filter edə bilərsiniz.
           </p>
         </div>
 
@@ -424,12 +568,16 @@ export default function CompanyDashboard() {
             />
           </div>
 
-          {search && (
+          {(search ||
+            selectedCompanies.length > 0 ||
+            directionFilter !== "ALL" ||
+            groupFilter !== "ALL" ||
+            Object.keys(columnFilters).length > 0) && (
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                setSearch("");
+                clearAllFilters();
               }}
               style={clearSearchBtn}
             >
@@ -439,7 +587,85 @@ export default function CompanyDashboard() {
         </div>
       </section>
 
-      {/* COMPANY CARDS */}
+      <section style={directionFilterCard} onClick={(e) => e.stopPropagation()}>
+        <div style={filterHeader}>
+          <div>
+            <h2 style={filterTitle}>Müqavilə bölməsi</h2>
+            <p style={filterText}>
+              Admin paneldə aktiv olan bölmələr və həmin bölmələrə bağlı qruplar burada görünür.
+            </p>
+          </div>
+        </div>
+
+        <div style={filterButtonRow}>
+          <button
+            type="button"
+            onClick={() => {
+              setDirectionFilter("ALL");
+              setGroupFilter("ALL");
+            }}
+            style={{
+              ...filterButton,
+              ...(directionFilter === "ALL" ? filterButtonActive : {}),
+            }}
+          >
+            Hamısı
+          </button>
+
+          {contractDirections.map((direction) => (
+            <button
+              key={direction.id}
+              type="button"
+              onClick={() => {
+                setDirectionFilter(direction.code);
+                setGroupFilter("ALL");
+              }}
+              style={{
+                ...filterButton,
+                ...(directionFilter === direction.code ? filterButtonActive : {}),
+              }}
+            >
+              {direction.name}
+            </button>
+          ))}
+        </div>
+
+        {directionFilter !== "ALL" && (
+          <div style={groupFilterBox}>
+            <div style={groupFilterTitle}>
+              {getDirectionLabel(directionFilter)} müqavilə qrupları
+            </div>
+
+            <div style={filterButtonRow}>
+              <button
+                type="button"
+                onClick={() => setGroupFilter("ALL")}
+                style={{
+                  ...groupButton,
+                  ...(groupFilter === "ALL" ? groupButtonActive : {}),
+                }}
+              >
+                Hamısı
+              </button>
+
+              {getGroupsForDirection(directionFilter).map((group) => (
+                <button
+                  key={group.id}
+                  type="button"
+                  onClick={() => setGroupFilter(group.code)}
+                  style={{
+                    ...groupButton,
+                    ...(groupFilter === group.code ? groupButtonActive : {}),
+                  }}
+                >
+                  {group.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
       {companies.length > 1 && (
         <section style={companyGrid}>
           {companies.map((company) => {
@@ -457,10 +683,8 @@ export default function CompanyDashboard() {
 
                   setSelectedCompanies((prev) => {
                     if (prev.includes(company)) {
-                      // çıxart
                       return prev.filter((c) => c !== company);
                     } else {
-                      // əlavə et
                       return [...prev, company];
                     }
                   });
@@ -492,12 +716,15 @@ export default function CompanyDashboard() {
         </section>
       )}
 
-      {/* CONTENT */}
       <section style={contentContainerStyle}>
         <div style={tableHeader}>
           <div>
             <h2 style={tableTitle}>
-              {selectedCompanies.length > 0
+              {directionFilter !== "ALL"
+                ? groupFilter === "ALL"
+                  ? `${getDirectionLabel(directionFilter)} müqavilələr`
+                  : `${getDirectionLabel(directionFilter)} / ${getGroupLabel(groupFilter)}`
+                : selectedCompanies.length > 0
                 ? `Seçilmiş şirkətlər (${selectedCompanies.length})`
                 : "Bütün müqavilələr"}
             </h2>
@@ -508,12 +735,15 @@ export default function CompanyDashboard() {
             </p>
           </div>
 
-          {selectedCompanies.length > 0 && (
+          {(selectedCompanies.length > 0 ||
+            directionFilter !== "ALL" ||
+            groupFilter !== "ALL" ||
+            Object.keys(columnFilters).length > 0) && (
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                setSelectedCompanies([]);
+                clearAllFilters();
               }}
               style={clearFilterBtn}
             >
@@ -527,73 +757,89 @@ export default function CompanyDashboard() {
             <div style={emptyIcon}>📭</div>
             <h3 style={emptyTitle}>Müqavilə tapılmadı</h3>
             <p style={emptyText}>
-              Axtarış sözünü dəyişin və ya şirkət filterlərini təmizləyərək
-              yenidən yoxlayın.
+              Axtarış sözünü dəyişin və ya filterləri təmizləyərək yenidən
+              yoxlayın.
             </p>
           </div>
         ) : (
           <>
-            {/* DESKTOP TABLE */}
             <div className="desktop-table" style={tableWrap}>
               <table style={tableStyle}>
                 <thead>
                   <tr style={theadRow}>
-                    <th
-                      style={{ ...thStyle, cursor: "pointer" }}
-                      onClick={() => requestSort("company_name")}
-                    >
-                      <span style={thInner}>
-                        Şirkət
-                        <span style={sortMark}>
-                          {sortIcon("company_name")}
-                        </span>
-                      </span>
-                    </th>
+                    <FilterTh
+                      label="Şirkət"
+                      columnKey="company_name"
+                      openFilterKey={openFilterKey}
+                      setOpenFilterKey={setOpenFilterKey}
+                      values={getAvailableColumnValues("company_name")}
+                      selectedValues={columnFilters.company_name || []}
+                      onToggle={toggleColumnFilter}
+                      onClear={clearColumnFilter}
+                      active={isColumnFilterActive("company_name")}
+                    />
 
-                    <th
-                      style={{ ...thStyle, cursor: "pointer" }}
-                      onClick={() => requestSort("counterparty")}
-                    >
-                      <span style={thInner}>
-                        Müqavilə
-                        <span style={sortMark}>
-                          {sortIcon("counterparty")}
-                        </span>
-                      </span>
-                    </th>
+                    <FilterTh
+                      label="Müqavilə"
+                      columnKey="counterparty"
+                      openFilterKey={openFilterKey}
+                      setOpenFilterKey={setOpenFilterKey}
+                      values={getAvailableColumnValues("counterparty")}
+                      selectedValues={columnFilters.counterparty || []}
+                      onToggle={toggleColumnFilter}
+                      onClear={clearColumnFilter}
+                      active={isColumnFilterActive("counterparty")}
+                    />
 
-                    <th
-                      style={{ ...thStyle, cursor: "pointer" }}
-                      onClick={() => requestSort("start_date")}
-                    >
-                      <span style={thInner}>
-                        Başlama
-                        <span style={sortMark}>{sortIcon("start_date")}</span>
-                      </span>
-                    </th>
+                    <FilterTh
+                      label="Başlama"
+                      columnKey="start_date"
+                      openFilterKey={openFilterKey}
+                      setOpenFilterKey={setOpenFilterKey}
+                      values={getAvailableColumnValues("start_date")}
+                      selectedValues={columnFilters.start_date || []}
+                      onToggle={toggleColumnFilter}
+                      onClear={clearColumnFilter}
+                      active={isColumnFilterActive("start_date")}
+                    />
 
-                    <th
-                      style={{ ...thStyle, cursor: "pointer" }}
-                      onClick={() => requestSort("end_date")}
-                    >
-                      <span style={thInner}>
-                        Bitmə
-                        <span style={sortMark}>{sortIcon("end_date")}</span>
-                      </span>
-                    </th>
+                    <FilterTh
+                      label="Bitmə"
+                      columnKey="end_date"
+                      openFilterKey={openFilterKey}
+                      setOpenFilterKey={setOpenFilterKey}
+                      values={getAvailableColumnValues("end_date")}
+                      selectedValues={columnFilters.end_date || []}
+                      onToggle={toggleColumnFilter}
+                      onClear={clearColumnFilter}
+                      active={isColumnFilterActive("end_date")}
+                    />
 
                     <th style={thStyle}>Status</th>
-                    <th style={thStyle}>Yeniləmə</th>
 
-                    <th
-                      style={{ ...thStyle, cursor: "pointer" }}
-                      onClick={() => requestSort("file_url")}
-                    >
-                      <span style={thInner}>
-                        Sənəd
-                        <span style={sortMark}>{sortIcon("file_url")}</span>
-                      </span>
-                    </th>
+                    <FilterTh
+                      label="Yeniləmə"
+                      columnKey="auto_renew"
+                      openFilterKey={openFilterKey}
+                      setOpenFilterKey={setOpenFilterKey}
+                      values={getAvailableColumnValues("auto_renew")}
+                      selectedValues={columnFilters.auto_renew || []}
+                      onToggle={toggleColumnFilter}
+                      onClear={clearColumnFilter}
+                      active={isColumnFilterActive("auto_renew")}
+                    />
+
+                    <FilterTh
+                      label="Sənəd"
+                      columnKey="file_url"
+                      openFilterKey={openFilterKey}
+                      setOpenFilterKey={setOpenFilterKey}
+                      values={getAvailableColumnValues("file_url")}
+                      selectedValues={columnFilters.file_url || []}
+                      onToggle={toggleColumnFilter}
+                      onClear={clearColumnFilter}
+                      active={isColumnFilterActive("file_url")}
+                    />
 
                     <th style={thStyle}>Əməliyyatlar</th>
                   </tr>
@@ -707,7 +953,6 @@ export default function CompanyDashboard() {
               </table>
             </div>
 
-            {/* MOBILE CARDS */}
             <div className="mobile-cards" style={mobileGrid}>
               {sortedAndFilteredContracts.map((c) => {
                 const days = daysLeft(c.end_date);
@@ -722,12 +967,23 @@ export default function CompanyDashboard() {
 
                         <div>
                           <span style={mobileCompanyName}>{c.company_name}</span>
-
                           <h3 style={mobileContractTitle}>{c.counterparty}</h3>
                         </div>
                       </div>
 
                       {expiryBadge(days)}
+                    </div>
+
+                    <div style={mobileMetaRow}>
+                      <span style={mobileMetaPill}>
+                        {getDirectionLabel(c.contract_direction)}
+                      </span>
+
+                      {c.contract_group && (
+                        <span style={mobileMetaPill}>
+                          {getGroupLabel(c.contract_group)}
+                        </span>
+                      )}
                     </div>
 
                     <div style={mobileInfoRow}>
@@ -787,6 +1043,18 @@ export default function CompanyDashboard() {
                           type="button"
                         >
                           Arxiv
+                        </button>
+                      )}
+
+                      {permissions.some(
+                        (p) => p.company_id === c.company_id && p.can_edit
+                      ) && (
+                        <button
+                          onClick={() => openEditModal(c)}
+                          style={editBtn}
+                          type="button"
+                        >
+                          Edit
                         </button>
                       )}
                     </div>
@@ -851,7 +1119,6 @@ export default function CompanyDashboard() {
             </div>
 
             <div style={modalForm}>
-              {/* COMPANY */}
               <div style={modalField}>
                 <label style={modalLabel}>Şirkət</label>
 
@@ -873,7 +1140,6 @@ export default function CompanyDashboard() {
                 </select>
               </div>
 
-              {/* COUNTERPARTY */}
               <div style={modalField}>
                 <label style={modalLabel}>Counterparty</label>
 
@@ -890,7 +1156,57 @@ export default function CompanyDashboard() {
                 />
               </div>
 
-              {/* START DATE */}
+              <div style={modalField}>
+                <label style={modalLabel}>Müqavilə bölməsi</label>
+
+                <select
+                  value={editingContract.contract_direction || ""}
+                  onChange={(e) => {
+                    const newDirectionCode = e.target.value;
+                    const firstGroup = getGroupsForDirection(newDirectionCode)[0];
+
+                    setEditingContract({
+                      ...editingContract,
+                      contract_direction: newDirectionCode,
+                      contract_group: firstGroup?.code || "",
+                    });
+                  }}
+                  style={inputStyle}
+                >
+                  {contractDirections.map((direction) => (
+                    <option key={direction.id} value={direction.code}>
+                      {direction.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={modalField}>
+                <label style={modalLabel}>Müqavilə qrupu</label>
+
+                <select
+                  value={editingContract.contract_group || ""}
+                  onChange={(e) =>
+                    setEditingContract({
+                      ...editingContract,
+                      contract_group: e.target.value,
+                    })
+                  }
+                  style={inputStyle}
+                  disabled={getGroupsForDirection(editingContract.contract_direction).length === 0}
+                >
+                  {getGroupsForDirection(editingContract.contract_direction).length === 0 ? (
+                    <option value="">Bu bölmədə aktiv qrup yoxdur</option>
+                  ) : (
+                    getGroupsForDirection(editingContract.contract_direction).map((group) => (
+                      <option key={group.id} value={group.code}>
+                        {group.name}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+
               <div style={modalField}>
                 <label style={modalLabel}>Başlama tarixi</label>
 
@@ -907,7 +1223,6 @@ export default function CompanyDashboard() {
                 />
               </div>
 
-              {/* END DATE */}
               <div style={modalField}>
                 <label style={modalLabel}>Bitmə tarixi</label>
 
@@ -924,7 +1239,6 @@ export default function CompanyDashboard() {
                 />
               </div>
 
-              {/* FILE */}
               <div style={modalField}>
                 <label style={modalLabel}>Fayl</label>
 
@@ -957,7 +1271,6 @@ export default function CompanyDashboard() {
               </div>
             </div>
 
-            {/* BUTTONS */}
             <div style={modalActions}>
               <button onClick={updateContract} style={saveBtn} type="button">
                 Save
@@ -978,7 +1291,92 @@ export default function CompanyDashboard() {
   );
 }
 
-// Sənin köhnə funksiyaların və nişanların (status badge)
+type FilterThProps = {
+  label: string;
+  columnKey: keyof Contract;
+  openFilterKey: keyof Contract | null;
+  setOpenFilterKey: (key: keyof Contract | null) => void;
+  values: string[];
+  selectedValues: string[];
+  active: boolean;
+  onToggle: (key: keyof Contract, value: string) => void;
+  onClear: (key: keyof Contract) => void;
+};
+
+function FilterTh({
+  label,
+  columnKey,
+  openFilterKey,
+  setOpenFilterKey,
+  values,
+  selectedValues,
+  active,
+  onToggle,
+  onClear,
+}: FilterThProps) {
+  const isOpen = openFilterKey === columnKey;
+
+  return (
+    <th style={thStyle}>
+      <div style={filterThWrap}>
+        <button
+          type="button"
+          style={{
+            ...filterThButton,
+            ...(active ? filterThButtonActive : {}),
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpenFilterKey(isOpen ? null : columnKey);
+          }}
+        >
+          <span>{label}</span>
+          <span style={filterIcon}>{active ? "●" : "▾"}</span>
+        </button>
+
+        {isOpen && (
+          <div style={filterDropdown} onClick={(e) => e.stopPropagation()}>
+            <div style={filterDropdownHeader}>
+              <strong style={filterDropdownTitle}>{label} filteri</strong>
+
+              <button
+                type="button"
+                style={filterClearSmall}
+                onClick={() => onClear(columnKey)}
+              >
+                Təmizlə
+              </button>
+            </div>
+
+            <div style={filterOptions}>
+              {values.length === 0 ? (
+                <div style={filterEmpty}>Dəyər yoxdur</div>
+              ) : (
+                values.map((value) => (
+                  <label key={value} style={filterOption}>
+                    <input
+                      type="checkbox"
+                      checked={selectedValues.includes(value)}
+                      onChange={() => onToggle(columnKey, value)}
+                      style={filterCheckbox}
+                    />
+                    <span style={filterOptionText}>{value}</span>
+                  </label>
+                ))
+              )}
+            </div>
+
+            <div style={filterDropdownFooter}>
+              Seçilmiş: {selectedValues.length || "hamısı"}
+            </div>
+          </div>
+        )}
+      </div>
+    </th>
+  );
+}
+
+
 function expiryBadge(days: number) {
   if (days <= 7) return <span style={dangerBadge}>7 Gün</span>;
   if (days <= 30) return <span style={warningBadge}>30 GÜN</span>;
@@ -1124,11 +1522,9 @@ const pdfExportBtnStyle: CSSProperties = {
   boxShadow: "0 16px 34px rgba(225,29,72,0.24)",
 };
 
-/* STATS */
-
 const statsGrid: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
   gap: 14,
   marginBottom: 20,
 };
@@ -1197,7 +1593,15 @@ const statIconGreen: CSSProperties = {
   background: "#dcfce7",
 };
 
-/* TOOLBAR */
+const statIconPurple: CSSProperties = {
+  ...statIconBlue,
+  background: "#ede9fe",
+};
+
+const statIconGray: CSSProperties = {
+  ...statIconBlue,
+  background: "#f1f5f9",
+};
 
 const toolbarCard: CSSProperties = {
   display: "flex",
@@ -1281,7 +1685,77 @@ const clearSearchBtn: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-/* COMPANY CARDS */
+const directionFilterCard: CSSProperties = {
+  marginBottom: 18,
+  padding: 18,
+  borderRadius: 22,
+  background: "rgba(255,255,255,0.9)",
+  border: "1px solid rgba(203,213,225,0.86)",
+  boxShadow: "0 18px 45px rgba(15,23,42,0.07)",
+};
+
+const filterHeader: CSSProperties = {
+  marginBottom: 13,
+};
+
+const filterTitle: CSSProperties = {
+  margin: 0,
+  color: "#0f172a",
+  fontSize: 18,
+  fontWeight: 950,
+};
+
+const filterText: CSSProperties = {
+  margin: "6px 0 0",
+  color: "#64748b",
+  fontSize: 13,
+};
+
+const filterButtonRow: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 9,
+};
+
+const filterButton: CSSProperties = {
+  border: "1px solid #cbd5e1",
+  background: "#fff",
+  color: "#334155",
+  padding: "10px 13px",
+  borderRadius: 14,
+  cursor: "pointer",
+  fontSize: 13,
+  fontWeight: 900,
+};
+
+const filterButtonActive: CSSProperties = {
+  background: "linear-gradient(135deg, #2563eb, #1d4ed8)",
+  border: "1px solid rgba(255,255,255,0.25)",
+  color: "#fff",
+  boxShadow: "0 12px 26px rgba(37,99,235,0.25)",
+};
+
+const groupFilterBox: CSSProperties = {
+  marginTop: 14,
+  paddingTop: 14,
+  borderTop: "1px solid #e2e8f0",
+};
+
+const groupFilterTitle: CSSProperties = {
+  color: "#334155",
+  fontSize: 13,
+  fontWeight: 950,
+  marginBottom: 10,
+};
+
+const groupButton: CSSProperties = {
+  ...filterButton,
+  background: "#f8fafc",
+};
+
+const groupButtonActive: CSSProperties = {
+  ...filterButtonActive,
+};
 
 const companyGrid: CSSProperties = {
   display: "grid",
@@ -1383,8 +1857,6 @@ const companyCountLabel: CSSProperties = {
   opacity: 0.78,
   fontWeight: 700,
 };
-
-/* CONTENT / TABLE */
 
 const contentContainerStyle: CSSProperties = {
   background: "rgba(255,255,255,0.92)",
@@ -1529,8 +2001,6 @@ const datePill: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-/* BADGES */
-
 const renewBadge: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
@@ -1614,8 +2084,6 @@ const noPdfBadge: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
-/* BUTTONS */
-
 const pdfBtn: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
@@ -1674,8 +2142,6 @@ const editBtn: CSSProperties = {
   boxShadow: "0 10px 20px rgba(37,99,235,0.20)",
 };
 
-/* EMPTY */
-
 const emptyCard: CSSProperties = {
   padding: "46px 20px",
   borderRadius: 20,
@@ -1711,8 +2177,6 @@ const emptyText: CSSProperties = {
   fontSize: 14,
   lineHeight: 1.55,
 };
-
-/* MOBILE */
 
 const mobileGrid: CSSProperties = {
   gap: 16,
@@ -1772,6 +2236,25 @@ const mobileContractTitle: CSSProperties = {
   letterSpacing: "-0.025em",
 };
 
+const mobileMetaRow: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  flexWrap: "wrap",
+  marginBottom: 12,
+};
+
+const mobileMetaPill: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "6px 10px",
+  borderRadius: 999,
+  background: "#eff6ff",
+  color: "#1d4ed8",
+  fontSize: 12,
+  fontWeight: 950,
+};
+
 const mobileInfoRow: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "1fr 1fr",
@@ -1818,8 +2301,6 @@ const mobileActions: CSSProperties = {
   marginTop: 12,
   flexWrap: "wrap",
 };
-
-/* MODAL */
 
 const modalOverlay: CSSProperties = {
   position: "fixed",
@@ -2013,7 +2494,127 @@ const cancelBtn: CSSProperties = {
   fontWeight: 950,
 };
 
-/* LOADING */
+
+const filterThWrap: CSSProperties = {
+  position: "relative",
+  display: "inline-flex",
+  alignItems: "center",
+};
+
+const filterThButton: CSSProperties = {
+  border: "none",
+  background: "transparent",
+  color: "#475569",
+  fontSize: 12,
+  fontWeight: 950,
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
+  cursor: "pointer",
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 7,
+  padding: 0,
+};
+
+const filterThButtonActive: CSSProperties = {
+  color: "#2563eb",
+};
+
+const filterIcon: CSSProperties = {
+  fontSize: 12,
+  color: "inherit",
+};
+
+const filterDropdown: CSSProperties = {
+  position: "absolute",
+  top: "calc(100% + 10px)",
+  left: 0,
+  zIndex: 50,
+  width: 250,
+  maxWidth: "70vw",
+  background: "#fff",
+  border: "1px solid #cbd5e1",
+  borderRadius: 16,
+  boxShadow: "0 22px 55px rgba(15,23,42,0.22)",
+  padding: 12,
+  textTransform: "none",
+  letterSpacing: 0,
+};
+
+const filterDropdownHeader: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 10,
+  paddingBottom: 10,
+  borderBottom: "1px solid #e2e8f0",
+};
+
+const filterDropdownTitle: CSSProperties = {
+  color: "#0f172a",
+  fontSize: 13,
+  fontWeight: 950,
+};
+
+const filterClearSmall: CSSProperties = {
+  border: "1px solid #cbd5e1",
+  background: "#f8fafc",
+  color: "#334155",
+  borderRadius: 10,
+  padding: "6px 8px",
+  fontSize: 12,
+  fontWeight: 850,
+  cursor: "pointer",
+};
+
+const filterOptions: CSSProperties = {
+  maxHeight: 220,
+  overflowY: "auto",
+  display: "grid",
+  gap: 7,
+  paddingTop: 10,
+};
+
+const filterOption: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  padding: "8px 9px",
+  borderRadius: 11,
+  background: "#f8fafc",
+  border: "1px solid #eef2f7",
+  cursor: "pointer",
+};
+
+const filterCheckbox: CSSProperties = {
+  width: 15,
+  height: 15,
+  accentColor: "#2563eb",
+  flexShrink: 0,
+};
+
+const filterOptionText: CSSProperties = {
+  color: "#0f172a",
+  fontSize: 13,
+  fontWeight: 750,
+  lineHeight: 1.35,
+  wordBreak: "break-word",
+};
+
+const filterEmpty: CSSProperties = {
+  color: "#64748b",
+  fontSize: 13,
+  padding: "10px 4px",
+};
+
+const filterDropdownFooter: CSSProperties = {
+  marginTop: 10,
+  paddingTop: 9,
+  borderTop: "1px solid #e2e8f0",
+  color: "#64748b",
+  fontSize: 12,
+  fontWeight: 800,
+};
 
 const loadingBox: CSSProperties = {
   minHeight: "calc(100vh - 120px)",

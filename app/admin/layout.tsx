@@ -115,6 +115,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
               <span style={brandTextWrap}>
                 <span style={brandTitle}>Admin Panel</span>
+
                 <span style={brandSubtitle}>Müqavilə idarəetməsi</span>
               </span>
             </Link>
@@ -127,6 +128,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
             <Link href="/admin/contracts" style={linkStyle("/admin/contracts")}>
               📄 Müqavilələr
+            </Link>
+            <Link href="/admin/contract-settings" style={linkStyle("/admin/contract-settings")}>
+              ⚙️ Müqavilə ayarları
             </Link>
 
             <Link href="/admin/users" style={linkStyle("/admin/users")}>

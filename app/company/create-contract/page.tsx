@@ -8,9 +8,28 @@ type Company = {
   name: string;
 };
 
+type ContractDirection = {
+  id: string;
+  name: string;
+  code: string;
+  is_active: boolean;
+};
+
+type ContractGroup = {
+  id: string;
+  direction_id: string;
+  name: string;
+  code: string;
+  is_active: boolean;
+};
+
 export default function CreateContract() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [permissions, setPermissions] = useState<any[]>([]);
+
+  const [directions, setDirections] = useState<ContractDirection[]>([]);
+  const [groups, setGroups] = useState<ContractGroup[]>([]);
+
   const [companyId, setCompanyId] = useState("");
   const [counterparty, setCounterparty] = useState("");
   const [startDate, setStartDate] = useState("");
@@ -18,8 +37,45 @@ export default function CreateContract() {
   const [autoRenew, setAutoRenew] = useState(false);
   const [file, setFile] = useState<File | null>(null);
 
+  const [contractDirection, setContractDirection] = useState("");
+  const [contractGroup, setContractGroup] = useState("");
+
+  async function loadContractSettings() {
+    const { data: directionData, error: directionError } = await supabase
+      .from("contract_directions")
+      .select("*")
+      .eq("is_active", true)
+      .order("created_at", { ascending: true });
+
+    const { data: groupData, error: groupError } = await supabase
+      .from("contract_groups")
+      .select("*")
+      .eq("is_active", true)
+      .order("created_at", { ascending: true });
+
+    if (directionError || groupError) {
+      alert("Müqavilə bölmə və qrupları yüklənmədi");
+      return;
+    }
+
+    const safeDirections = directionData || [];
+    const safeGroups = groupData || [];
+
+    setDirections(safeDirections);
+    setGroups(safeGroups);
+
+    if (safeDirections.length > 0) {
+      const firstDirection = safeDirections[0];
+      const firstGroups = safeGroups.filter(
+        (g) => g.direction_id === firstDirection.id
+      );
+
+      setContractDirection(firstDirection.code);
+      setContractGroup(firstGroups[0]?.code || "");
+    }
+  }
+
   async function loadCompanies(userId: string, perms: any[]) {
-    // 🔥 yalnız create icazəsi olan company-lər
     const ids = perms.filter((p) => p.can_create).map((p) => p.company_id);
 
     if (ids.length === 0) return;
@@ -38,7 +94,8 @@ export default function CreateContract() {
       const userId = userData.user?.id;
       if (!userId) return;
 
-      // 🔥 permissionləri götür
+      await loadContractSettings();
+
       const { data: perms } = await supabase
         .from("user_company_permissions")
         .select("*")
@@ -47,7 +104,6 @@ export default function CreateContract() {
       const safePerms = perms || [];
       setPermissions(safePerms);
 
-      // 🔥 heç bir create icazəsi yoxdursa BLOCK
       const canCreate = safePerms.some((p) => p.can_create);
 
       if (!canCreate) {
@@ -62,6 +118,16 @@ export default function CreateContract() {
     init();
   }, []);
 
+  const selectedDirection = directions.find(
+    (d) => d.code === contractDirection
+  );
+
+  const filteredGroups = groups.filter(
+    (g) => g.direction_id === selectedDirection?.id
+  );
+
+  const selectedGroup = filteredGroups.find((g) => g.code === contractGroup);
+
   function calculateEndDate(start: string, months: number) {
     if (!start || isNaN(months)) return null;
     const date = new Date(start);
@@ -73,10 +139,13 @@ export default function CreateContract() {
 
   async function uploadFile() {
     if (!file) return null;
+
     const fileName = `${Date.now()}-${file.name}`;
+
     const { error } = await supabase.storage
       .from("contracts")
       .upload(fileName, file);
+
     if (error) return null;
 
     const { data } = supabase.storage.from("contracts").getPublicUrl(fileName);
@@ -90,6 +159,8 @@ export default function CreateContract() {
       !counterparty ||
       !companyId ||
       !startDate ||
+      !contractDirection ||
+      !contractGroup ||
       isNaN(monthCount) ||
       monthCount <= 0
     ) {
@@ -97,7 +168,6 @@ export default function CreateContract() {
       return;
     }
 
-    // 🔥 COMPANY üzrə permission check
     const perm = permissions.find((p) => p.company_id === companyId);
 
     if (!perm || !perm.can_create) {
@@ -124,6 +194,8 @@ export default function CreateContract() {
       status: "active",
       auto_renew: autoRenew,
       created_by: userId,
+      contract_direction: contractDirection,
+      contract_group: contractGroup,
     });
 
     if (error) {
@@ -132,6 +204,32 @@ export default function CreateContract() {
     }
 
     alert("Müqavilə yaradıldı");
+
+    setCounterparty("");
+    setStartDate("");
+    setDuration("12");
+    setAutoRenew(false);
+    setFile(null);
+
+    if (directions.length > 0) {
+      const firstDirection = directions[0];
+      const firstGroups = groups.filter(
+        (g) => g.direction_id === firstDirection.id
+      );
+
+      setContractDirection(firstDirection.code);
+      setContractGroup(firstGroups[0]?.code || "");
+    }
+  }
+
+  function handleDirectionChange(directionCode: string) {
+    const direction = directions.find((d) => d.code === directionCode);
+    const directionGroups = groups.filter(
+      (g) => g.direction_id === direction?.id
+    );
+
+    setContractDirection(directionCode);
+    setContractGroup(directionGroups[0]?.code || "");
   }
 
   const selectedCompany = companies.find((c) => c.id === companyId);
@@ -171,7 +269,8 @@ export default function CreateContract() {
 
             <p className="create-subtitle" style={subtitleStyle}>
               İcazəniz olan şirkətlər üçün yeni müqavilə məlumatlarını daxil
-              edin, müddəti seçin və lazım olduqda müqavilə faylını əlavə edin.
+              edin, bölmə və qrup seçin, müddəti təyin edin və lazım olduqda
+              müqavilə faylını əlavə edin.
             </p>
           </div>
 
@@ -186,7 +285,6 @@ export default function CreateContract() {
       </section>
 
       <section className="create-layout" style={layoutGrid}>
-        {/* FORM */}
         <div className="create-card" style={cardStyle}>
           <div className="create-card-header" style={cardHeader}>
             <div>
@@ -233,6 +331,43 @@ export default function CreateContract() {
             </div>
 
             <div style={fieldGroup}>
+              <label style={labelStyle}>Müqavilə bölməsi</label>
+              <select
+                className="create-input"
+                value={contractDirection}
+                onChange={(e) => handleDirectionChange(e.target.value)}
+                style={inputStyle}
+              >
+                {directions.map((d) => (
+                  <option key={d.id} value={d.code}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={fieldGroup}>
+              <label style={labelStyle}>Müqavilə qrupu</label>
+              <select
+                className="create-input"
+                value={contractGroup}
+                onChange={(e) => setContractGroup(e.target.value)}
+                style={inputStyle}
+                disabled={filteredGroups.length === 0}
+              >
+                {filteredGroups.length === 0 ? (
+                  <option value="">Bu bölmədə aktiv qrup yoxdur</option>
+                ) : (
+                  filteredGroups.map((g) => (
+                    <option key={g.id} value={g.code}>
+                      {g.name}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+
+            <div style={fieldGroup}>
               <label style={labelStyle}>Başlama tarixi</label>
               <input
                 className="create-input"
@@ -254,6 +389,36 @@ export default function CreateContract() {
               />
             </div>
           </div>
+
+          <label
+            className="create-renew-box"
+            style={renewBox}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              checked={autoRenew}
+              onChange={(e) => setAutoRenew(e.target.checked)}
+              style={renewCheckbox}
+            />
+
+            <span style={renewContent}>
+              <strong style={renewTitle}>Avtomatik yenilənmə</strong>
+              <span style={renewText}>
+                Seçilərsə, müqavilə bitmə tarixindən sonra avtomatik arxivə
+                düşməyəcək.
+              </span>
+            </span>
+
+            <span
+              style={{
+                ...renewBadgeBox,
+                ...(autoRenew ? renewBadgeBoxActive : {}),
+              }}
+            >
+              {autoRenew ? "Aktiv" : "Passiv"}
+            </span>
+          </label>
 
           <div style={uploadSection}>
             <input
@@ -301,7 +466,6 @@ export default function CreateContract() {
           </button>
         </div>
 
-        {/* PREVIEW */}
         <aside className="create-preview" style={previewCard}>
           <div className="create-preview-header" style={previewHeader}>
             <span className="create-preview-icon" style={previewIcon}>
@@ -323,7 +487,19 @@ export default function CreateContract() {
 
             <div style={previewItem}>
               <span style={previewLabel}>Şirkət</span>
-              <strong style={previewValue}>{selectedCompany?.name || "-"}</strong>
+              <strong style={previewValue}>
+                {selectedCompany?.name || "-"}
+              </strong>
+            </div>
+
+            <div style={previewItem}>
+              <span style={previewLabel}>Bölmə</span>
+              <strong style={previewValue}>{selectedDirection?.name || "-"}</strong>
+            </div>
+
+            <div style={previewItem}>
+              <span style={previewLabel}>Qrup</span>
+              <strong style={previewValue}>{selectedGroup?.name || "-"}</strong>
             </div>
 
             <div style={previewItem}>
@@ -339,13 +515,24 @@ export default function CreateContract() {
             <div style={previewItem}>
               <span style={previewLabel}>Müddət</span>
               <strong style={previewValue}>
-                {!isNaN(monthCount) && monthCount > 0 ? `${monthCount} ay` : "-"}
+                {!isNaN(monthCount) && monthCount > 0
+                  ? `${monthCount} ay`
+                  : "-"}
+              </strong>
+            </div>
+
+            <div style={previewItem}>
+              <span style={previewLabel}>Avtomatik yenilənmə</span>
+              <strong style={previewValue}>
+                {autoRenew ? "Bəli" : "Xeyr"}
               </strong>
             </div>
 
             <div style={previewItem}>
               <span style={previewLabel}>Fayl</span>
-              <strong style={previewValue}>{file ? "Əlavə olunub" : "-"}</strong>
+              <strong style={previewValue}>
+                {file ? "Əlavə olunub" : "-"}
+              </strong>
             </div>
           </div>
 
@@ -484,6 +671,11 @@ export default function CreateContract() {
             font-size: 13px !important;
             border-radius: 14px !important;
             min-width: 0 !important;
+          }
+
+          .create-renew-box {
+            flex-direction: column !important;
+            align-items: flex-start !important;
           }
 
           .create-upload-label {
@@ -781,6 +973,67 @@ const inputStyle: CSSProperties = {
   fontSize: 14,
   outline: "none",
   boxShadow: "inset 0 1px 0 rgba(15,23,42,0.03)",
+};
+
+/* RENEW */
+
+const renewBox: CSSProperties = {
+  cursor: "pointer",
+  marginTop: 18,
+  display: "flex",
+  alignItems: "center",
+  gap: 13,
+  width: "100%",
+  padding: 15,
+  borderRadius: 20,
+  background:
+    "linear-gradient(135deg, rgba(240,253,244,0.96), rgba(239,246,255,0.96))",
+  border: "1px solid #bfdbfe",
+};
+
+const renewCheckbox: CSSProperties = {
+  width: 18,
+  height: 18,
+  accentColor: "#2563eb",
+  flexShrink: 0,
+};
+
+const renewContent: CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  display: "flex",
+  flexDirection: "column",
+  gap: 3,
+};
+
+const renewTitle: CSSProperties = {
+  color: "#0f172a",
+  fontSize: 14,
+  fontWeight: 950,
+};
+
+const renewText: CSSProperties = {
+  color: "#64748b",
+  fontSize: 13,
+  lineHeight: 1.45,
+};
+
+const renewBadgeBox: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "7px 10px",
+  borderRadius: 999,
+  background: "#f1f5f9",
+  color: "#64748b",
+  fontSize: 12,
+  fontWeight: 950,
+  whiteSpace: "nowrap",
+};
+
+const renewBadgeBoxActive: CSSProperties = {
+  background: "#dcfce7",
+  color: "#166534",
 };
 
 /* UPLOAD */
