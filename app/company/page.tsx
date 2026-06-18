@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { supabase } from "@/lib/supabase";
+import { createAuditLog } from "@/lib/auditlog";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -10,13 +11,20 @@ type Contract = {
   id: string;
   company_name: string;
   company_id: string;
+  company_voen?: string | null;
   counterparty: string;
+  counterparty_voen?: string | null;
   start_date: string;
   end_date: string;
   file_url: string | null;
+  generated_file_path?: string | null;
+  template_name?: string | null;
+  template_file_path?: string | null;
   auto_renew: boolean;
   contract_direction: string | null;
   contract_group: string | null;
+  created_by?: string | null;
+  created_by_name?: string | null;
 };
 
 type ContractDirection = {
@@ -36,16 +44,28 @@ type ContractGroup = {
 
 type DirectionFilter = "ALL" | string;
 type GroupFilter = "ALL" | string;
+type StatFilter =
+  | "ALL"
+  | "EXPIRING_30"
+  | "CRITICAL"
+  | "AUTO_RENEW"
+  | "PDF"
+  | `DIRECTION:${string}`;
 
 export default function CompanyDashboard() {
   const [contracts, setContracts] = useState<Contract[]>([]);
-  const [contractDirections, setContractDirections] = useState<ContractDirection[]>([]);
+  const [contractDirections, setContractDirections] = useState<
+    ContractDirection[]
+  >([]);
   const [contractGroups, setContractGroups] = useState<ContractGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCompanies, setSelectedCompanies] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [permissions, setPermissions] = useState<any[]>([]);
   const [editingContract, setEditingContract] = useState<any>(null);
+  const [activeStatFilter, setActiveStatFilter] = useState<StatFilter>("ALL");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const [directionFilter, setDirectionFilter] =
     useState<DirectionFilter>("ALL");
@@ -81,6 +101,63 @@ export default function CompanyDashboard() {
     setContractGroups(groupData || []);
   }
 
+  function getProfileName(profile: any) {
+    if (!profile) return "-";
+
+    const firstLast = `${profile.first_name || ""} ${profile.last_name || ""
+      }`.trim();
+
+    return (
+      profile.full_name ||
+      firstLast ||
+      profile.name ||
+      profile.display_name ||
+      profile.email ||
+      "-"
+    );
+  }
+
+  async function enrichContractsWithCreators(rows: any[]) {
+    const creatorIds = Array.from(
+      new Set(
+        rows
+          .map((c) => c.created_by)
+          .filter((id): id is string => Boolean(id))
+      )
+    );
+
+    if (creatorIds.length === 0) {
+      return rows.map((c) => ({
+        ...c,
+        created_by_name: "-",
+      }));
+    }
+
+    const { data: profiles, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .in("id", creatorIds);
+
+    if (error) {
+      console.error("Creator profiles load error:", error);
+      return rows.map((c) => ({
+        ...c,
+        created_by_name: c.created_by || "-",
+      }));
+    }
+
+    const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
+
+    return rows.map((c) => {
+      const profile = c.created_by ? profileMap.get(c.created_by) : null;
+
+      return {
+        ...c,
+        created_by_name: getProfileName(profile),
+      };
+    });
+  }
+
   async function loadContracts() {
     await loadContractSettings();
 
@@ -111,12 +188,18 @@ export default function CompanyDashboard() {
 
     const companyIds = userCompanies.map((c) => c.company_id);
 
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("contracts")
       .select("*")
       .in("company_id", companyIds)
       .eq("status", "active")
       .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error(error);
+      setLoading(false);
+      return;
+    }
 
     if (data) {
       const now = new Date().getTime();
@@ -141,7 +224,11 @@ export default function CompanyDashboard() {
         return !(end < now && !c.auto_renew);
       });
 
-      setContracts(activeContracts as Contract[]);
+      const enrichedContracts = await enrichContractsWithCreators(
+        activeContracts
+      );
+
+      setContracts(enrichedContracts as Contract[]);
     }
 
     setLoading(false);
@@ -168,23 +255,44 @@ export default function CompanyDashboard() {
       }
     }
 
-    const { error } = await supabase
+    const oldContract =
+      contracts.find((contract) => contract.id === editingContract.id) || null;
+
+    const updatePayload = {
+      company_name: editingContract.company_name,
+      company_voen: editingContract.company_voen || null,
+      counterparty: editingContract.counterparty,
+      counterparty_voen: editingContract.counterparty_voen || null,
+      start_date: editingContract.start_date,
+      end_date: editingContract.end_date,
+      file_url: fileUrl,
+      contract_direction: editingContract.contract_direction || null,
+      contract_group: editingContract.contract_group || null,
+    };
+
+    const { data: updatedContract, error } = await supabase
       .from("contracts")
-      .update({
-        company_name: editingContract.company_name,
-        counterparty: editingContract.counterparty,
-        start_date: editingContract.start_date,
-        end_date: editingContract.end_date,
-        file_url: fileUrl,
-        contract_direction: editingContract.contract_direction || null,
-        contract_group: editingContract.contract_group || null,
-      })
-      .eq("id", editingContract.id);
+      .update(updatePayload)
+      .eq("id", editingContract.id)
+      .select("*")
+      .single();
 
     if (error) {
       alert("Xəta baş verdi");
+      console.error(error);
       return;
     }
+
+    await createAuditLog({
+      action: "UPDATE_CONTRACT",
+      tableName: "contracts",
+      recordId: editingContract.id,
+      description: `Şirkət panelində müqavilə yeniləndi: ${
+        updatePayload.counterparty || editingContract.id
+      }`,
+      oldData: oldContract,
+      newData: updatedContract || updatePayload,
+    });
 
     alert("Updated");
     setEditingContract(null);
@@ -192,9 +300,12 @@ export default function CompanyDashboard() {
   }
 
   function openEditModal(contract: any) {
-    const directionCode = contract.contract_direction || contractDirections[0]?.code || "";
+    const directionCode =
+      contract.contract_direction || contractDirections[0]?.code || "";
     const groupCode =
-      contract.contract_group || getGroupsForDirection(directionCode)[0]?.code || "";
+      contract.contract_group ||
+      getGroupsForDirection(directionCode)[0]?.code ||
+      "";
 
     setEditingContract({
       ...contract,
@@ -206,16 +317,106 @@ export default function CompanyDashboard() {
   useEffect(() => {
     loadContracts();
   }, []);
+  function isHttpUrl(value: string) {
+    return /^https?:\/\//i.test(value);
+  }
+
+  function getContractFilePath(contract: Contract) {
+    return contract.generated_file_path || contract.file_url || null;
+  }
+
+  function getFileLabel(contract: Contract) {
+    const filePath = getContractFilePath(contract);
+
+    if (!filePath) return "Fayl yoxdur";
+
+    const cleanPath = filePath.split("?")[0].toLowerCase();
+
+    if (cleanPath.endsWith(".pdf")) return "PDF bax";
+    if (cleanPath.endsWith(".docx")) return "DOCX bax";
+    if (cleanPath.endsWith(".doc")) return "DOC bax";
+
+    return "Fayla bax";
+  }
+
+  function normalizeContractsStoragePath(value: string) {
+    if (!value) return "";
+
+    if (!isHttpUrl(value)) {
+      return value.replace(/^\/+/, "");
+    }
+
+    try {
+      const url = new URL(value);
+      const publicMarker = "/storage/v1/object/public/contracts/";
+      const signedMarker = "/storage/v1/object/sign/contracts/";
+
+      if (url.pathname.includes(publicMarker)) {
+        return decodeURIComponent(url.pathname.split(publicMarker)[1] || "");
+      }
+
+      if (url.pathname.includes(signedMarker)) {
+        return decodeURIComponent(url.pathname.split(signedMarker)[1] || "");
+      }
+    } catch {
+      return value;
+    }
+
+    return value;
+  }
+
+  async function openContractFile(contract: Contract) {
+    const rawPath = getContractFilePath(contract);
+
+    if (!rawPath) {
+      alert("Bu müqaviləyə fayl əlavə edilməyib");
+      return;
+    }
+
+    if (isHttpUrl(rawPath)) {
+      window.open(rawPath, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    const storagePath = normalizeContractsStoragePath(rawPath);
+
+    const { data, error } = await supabase.storage
+      .from("contracts")
+      .createSignedUrl(storagePath, 60 * 10);
+
+    if (error || !data?.signedUrl) {
+      console.error(error);
+      alert("Fayl açıla bilmədi");
+      return;
+    }
+
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  }
+
 
   async function deleteContract(id: string) {
     if (!confirm("Silmək istədiyinizə əminsiniz?")) return;
+
+    const oldContract = contracts.find((c) => c.id === id) || null;
 
     const { error } = await supabase.from("contracts").delete().eq("id", id);
 
     if (error) {
       alert("Xəta baş verdi");
+      console.error(error);
       return;
     }
+
+    await createAuditLog({
+      action: "DELETE_CONTRACT",
+      tableName: "contracts",
+      recordId: id,
+      description: `Şirkət panelində müqavilə silindi: ${
+        oldContract?.counterparty || id
+      }`,
+      oldData: oldContract,
+      newData: null,
+    });
 
     setContracts((prev) => prev.filter((c) => c.id !== id));
   }
@@ -223,15 +424,31 @@ export default function CompanyDashboard() {
   async function archiveContract(id: string) {
     if (!confirm("Arxivə göndərmək istədiyinizə əminsiniz?")) return;
 
-    const { error } = await supabase
+    const oldContract = contracts.find((c) => c.id === id) || null;
+
+    const { data: updatedContract, error } = await supabase
       .from("contracts")
       .update({ status: "archived" })
-      .eq("id", id);
+      .eq("id", id)
+      .select("*")
+      .single();
 
     if (error) {
       alert("Xəta baş verdi");
+      console.error(error);
       return;
     }
+
+    await createAuditLog({
+      action: "ARCHIVE_CONTRACT",
+      tableName: "contracts",
+      recordId: id,
+      description: `Şirkət panelində müqavilə arxivə göndərildi: ${
+        oldContract?.counterparty || updatedContract?.counterparty || id
+      }`,
+      oldData: oldContract,
+      newData: updatedContract,
+    });
 
     setContracts((prev) => prev.filter((c) => c.id !== id));
   }
@@ -274,14 +491,18 @@ export default function CompanyDashboard() {
   }
 
   function getColumnValue(contract: Contract, key: keyof Contract) {
-    if (key === "contract_direction") return getDirectionLabel(contract.contract_direction);
+    if (key === "contract_direction")
+      return getDirectionLabel(contract.contract_direction);
     if (key === "contract_group") return getGroupLabel(contract.contract_group);
-    if (key === "start_date" || key === "end_date") return formatDate(contract[key]);
+    if (key === "start_date" || key === "end_date")
+      return formatDate(contract[key]);
     if (key === "auto_renew") return contract.auto_renew ? "Bəli" : "Xeyr";
-    if (key === "file_url") return contract.file_url ? "PDF var" : "PDF yoxdur";
+    if (key === "file_url") return getContractFilePath(contract) ? "Fayl var" : "Fayl yoxdur";
 
     const value = contract[key];
-    return value === null || value === undefined || value === "" ? "-" : String(value);
+    return value === null || value === undefined || value === ""
+      ? "-"
+      : String(value);
   }
 
   function getAvailableColumnValues(key: keyof Contract) {
@@ -321,10 +542,51 @@ export default function CompanyDashboard() {
     return (columnFilters[key] || []).length > 0;
   }
 
+  function applyStatFilter(contract: Contract) {
+    if (activeStatFilter === "ALL") return true;
+    if (activeStatFilter === "EXPIRING_30") return daysLeft(contract.end_date) <= 30;
+    if (activeStatFilter === "CRITICAL") return daysLeft(contract.end_date) <= 7;
+    if (activeStatFilter === "AUTO_RENEW") return contract.auto_renew;
+    if (activeStatFilter === "PDF") return Boolean(getContractFilePath(contract));
+
+    if (activeStatFilter.startsWith("DIRECTION:")) {
+      const directionCode = activeStatFilter.replace("DIRECTION:", "");
+      return contract.contract_direction === directionCode;
+    }
+
+    return true;
+  }
+  function applyDateRangeFilter(contract: Contract) {
+    if (!dateFrom && !dateTo) return true;
+
+    const contractDate = new Date(`${contract.start_date}T00:00:00`).getTime();
+
+    if (Number.isNaN(contractDate)) return false;
+
+    const fromTime = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : null;
+    const toTime = dateTo ? new Date(`${dateTo}T23:59:59`).getTime() : null;
+
+    if (fromTime !== null && contractDate < fromTime) return false;
+    if (toTime !== null && contractDate > toTime) return false;
+
+    return true;
+  }
+
+  function handleStatCardClick(filter: StatFilter) {
+    setActiveStatFilter((prev) => (prev === filter ? "ALL" : filter));
+    setSelectedCompanies([]);
+    setDirectionFilter("ALL");
+    setGroupFilter("ALL");
+    setColumnFilters({});
+    setOpenFilterKey(null);
+  }
+
   const companies = [...new Set(contracts.map((c) => c.company_name))];
 
   const sortedAndFilteredContracts = useMemo(() => {
     return contracts
+      .filter((c) => applyStatFilter(c))
+      .filter((c) => applyDateRangeFilter(c))
       .filter((c) => {
         if (selectedCompanies.length === 0) return true;
         return selectedCompanies.includes(c.company_name);
@@ -346,7 +608,14 @@ export default function CompanyDashboard() {
       .filter(
         (c) =>
           c.counterparty.toLowerCase().includes(search.toLowerCase()) ||
-          c.company_name.toLowerCase().includes(search.toLowerCase())
+          c.company_name.toLowerCase().includes(search.toLowerCase()) ||
+          (c.company_voen || "").toLowerCase().includes(search.toLowerCase()) ||
+          (c.counterparty_voen || "")
+            .toLowerCase()
+            .includes(search.toLowerCase()) ||
+          (c.created_by_name || "")
+            .toLowerCase()
+            .includes(search.toLowerCase())
       );
   }, [
     contracts,
@@ -357,17 +626,24 @@ export default function CompanyDashboard() {
     columnFilters,
     contractDirections,
     contractGroups,
+    activeStatFilter,
+    dateFrom,
+    dateTo,
   ]);
 
   const exportToExcel = () => {
     const dataToExport = sortedAndFilteredContracts.map((c) => ({
       Şirkət: c.company_name,
+      "Şirkət VÖEN": c.company_voen || "-",
       Müqavilə: c.counterparty,
+      "Qarşı tərəf VÖEN": c.counterparty_voen || "-",
+      Yaradan: c.created_by_name || "-",
       Bölmə: getDirectionLabel(c.contract_direction),
       Qrup: getGroupLabel(c.contract_group),
       Başlama: formatDate(c.start_date),
       Bitmə: formatDate(c.end_date),
       Yenilənmə: c.auto_renew ? "Bəli" : "Xeyr",
+      Sənəd: getContractFilePath(c) ? "Fayl var" : "Fayl yoxdur",
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
@@ -380,9 +656,10 @@ export default function CompanyDashboard() {
     const doc = new jsPDF();
     const tableColumn = [
       "Company",
+      "Company VOEN",
       "Counterparty",
-      "Direction",
-      "Group",
+      "Counterparty VOEN",
+      "Created By",
       "Start",
       "End",
       "Renew",
@@ -390,9 +667,10 @@ export default function CompanyDashboard() {
 
     const tableRows = sortedAndFilteredContracts.map((c) => [
       c.company_name,
+      c.company_voen || "-",
       c.counterparty,
-      getDirectionLabel(c.contract_direction),
-      getGroupLabel(c.contract_group),
+      c.counterparty_voen || "-",
+      c.created_by_name || "-",
       formatDate(c.start_date),
       formatDate(c.end_date),
       c.auto_renew ? "Yes" : "No",
@@ -410,19 +688,38 @@ export default function CompanyDashboard() {
     .length;
 
   const autoRenewCount = contracts.filter((c) => c.auto_renew).length;
-  const pdfCount = contracts.filter((c) => c.file_url).length;
+  const pdfCount = contracts.filter((c) => getContractFilePath(c)).length;
   const directionStats = contractDirections.map((direction) => ({
     ...direction,
-    count: contracts.filter((c) => c.contract_direction === direction.code).length,
+    count: contracts.filter((c) => c.contract_direction === direction.code)
+      .length,
   }));
 
   function clearAllFilters() {
     setSelectedCompanies([]);
     setSearch("");
+    setDateFrom("");
+    setDateTo("");
     setDirectionFilter("ALL");
     setGroupFilter("ALL");
     setColumnFilters({});
     setOpenFilterKey(null);
+    setActiveStatFilter("ALL");
+  }
+
+  function getActiveStatTitle() {
+    if (activeStatFilter === "ALL") return "";
+    if (activeStatFilter === "EXPIRING_30") return "30 günə bitən";
+    if (activeStatFilter === "CRITICAL") return "Kritik";
+    if (activeStatFilter === "AUTO_RENEW") return "Avto yenilənən";
+    if (activeStatFilter === "PDF") return "Faylı olan";
+
+    if (activeStatFilter.startsWith("DIRECTION:")) {
+      const directionCode = activeStatFilter.replace("DIRECTION:", "");
+      return getDirectionLabel(directionCode);
+    }
+
+    return "";
   }
 
   if (loading) {
@@ -449,7 +746,13 @@ export default function CompanyDashboard() {
   }
 
   return (
-    <div style={pageStyle} onClick={() => { setSelectedCompanies([]); setOpenFilterKey(null); }}>
+    <div
+      style={pageStyle}
+      onClick={() => {
+        setSelectedCompanies([]);
+        setOpenFilterKey(null);
+      }}
+    >
       <section style={heroCard}>
         <div style={heroGlowOne} />
         <div style={heroGlowTwo} />
@@ -498,60 +801,77 @@ export default function CompanyDashboard() {
         </div>
       </section>
 
-      <section style={statsGrid}>
-        <div style={statCard}>
-          <div style={statTop}>
-            <span style={statIconBlue}>📁</span>
-            <span style={statLabel}>Aktiv müqavilələr</span>
-          </div>
-          <strong style={statValue}>{contracts.length}</strong>
-          <span style={statHint}>Hazırda aktiv siyahıda olan müqavilələr</span>
-        </div>
+      <section style={statsGrid} onClick={(e) => e.stopPropagation()}>
+        <StatCard
+          icon="📁"
+          label="Aktiv müqavilələr"
+          value={contracts.length}
+          hint="Hazırda aktiv siyahıda olan müqavilələr"
+          active={activeStatFilter === "ALL"}
+          onClick={() => handleStatCardClick("ALL")}
+          iconStyle={statIconBlue}
+        />
 
         {directionStats.map((direction) => (
-          <div key={direction.id} style={statCard}>
-            <div style={statTop}>
-              <span style={statIconPurple}>🏷️</span>
-              <span style={statLabel}>{direction.name}</span>
-            </div>
-            <strong style={statValue}>{direction.count}</strong>
-            <span style={statHint}>Bu bölməyə aid aktiv müqavilələr</span>
-          </div>
+          <StatCard
+            key={direction.id}
+            icon="🏷️"
+            label={direction.name}
+            value={direction.count}
+            hint="Bu bölməyə aid aktiv müqavilələr"
+            active={activeStatFilter === `DIRECTION:${direction.code}`}
+            onClick={() => handleStatCardClick(`DIRECTION:${direction.code}`)}
+            iconStyle={statIconPurple}
+          />
         ))}
 
-        <div style={statCard}>
-          <div style={statTop}>
-            <span style={statIconOrange}>⏳</span>
-            <span style={statLabel}>30 günə bitən</span>
-          </div>
-          <strong style={statValue}>{expiringSoonCount}</strong>
-          <span style={statHint}>Bitmə tarixi yaxın olan müqavilələr</span>
-        </div>
+        <StatCard
+          icon="⏳"
+          label="30 günə bitən"
+          value={expiringSoonCount}
+          hint="Bitmə tarixi yaxın olan müqavilələr"
+          active={activeStatFilter === "EXPIRING_30"}
+          onClick={() => handleStatCardClick("EXPIRING_30")}
+          iconStyle={statIconOrange}
+        />
 
-        <div style={statCard}>
-          <div style={statTop}>
-            <span style={statIconRed}>⚠️</span>
-            <span style={statLabel}>Kritik</span>
-          </div>
-          <strong style={statValue}>{criticalCount}</strong>
-          <span style={statHint}>7 gün və ya daha az qalan müqavilələr</span>
-        </div>
+        <StatCard
+          icon="⚠️"
+          label="Kritik"
+          value={criticalCount}
+          hint="7 gün və ya daha az qalan müqavilələr"
+          active={activeStatFilter === "CRITICAL"}
+          onClick={() => handleStatCardClick("CRITICAL")}
+          iconStyle={statIconRed}
+        />
 
-        <div style={statCard}>
-          <div style={statTop}>
-            <span style={statIconGreen}>🔁</span>
-            <span style={statLabel}>Avto yenilənən</span>
-          </div>
-          <strong style={statValue}>{autoRenewCount}</strong>
-          <span style={statHint}>Avtomatik yenilənmə seçilmiş müqavilələr</span>
-        </div>
+        <StatCard
+          icon="🔁"
+          label="Avto yenilənən"
+          value={autoRenewCount}
+          hint="Avtomatik yenilənmə seçilmiş müqavilələr"
+          active={activeStatFilter === "AUTO_RENEW"}
+          onClick={() => handleStatCardClick("AUTO_RENEW")}
+          iconStyle={statIconGreen}
+        />
+
+        <StatCard
+          icon="📄"
+          label="Faylı olan"
+          value={pdfCount}
+          hint="Fayl əlavə edilmiş müqavilələr"
+          active={activeStatFilter === "PDF"}
+          onClick={() => handleStatCardClick("PDF")}
+          iconStyle={statIconGray}
+        />
       </section>
 
       <section style={toolbarCard}>
         <div style={toolbarInfo}>
           <h2 style={toolbarTitle}>Filter və axtarış</h2>
           <p style={toolbarText}>
-            Şirkət, bölmə, qrup və cədvəl sütunları üzrə Excel tipli filter edə bilərsiniz.
+            Şirkət, bölmə, qrup və cədvəl sütunları üzrə Excel tipli filter edə
+            bilərsiniz.
           </p>
         </div>
 
@@ -560,30 +880,55 @@ export default function CompanyDashboard() {
             <span style={searchIcon}>⌕</span>
 
             <input
-              placeholder="Müqavilə və ya şirkət üzrə axtar..."
+              placeholder="Müqavilə, şirkət, VÖEN və ya yaradan üzrə axtar..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onClick={(e) => e.stopPropagation()}
               style={searchInputStyle}
             />
           </div>
+          <div style={dateFilterWrap} onClick={(e) => e.stopPropagation()}>
+            <label style={dateLabel}>
+              Başlama
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                style={dateInputStyle}
+              />
+            </label>
+
+            <label style={dateLabel}>
+              Bitmə
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                style={dateInputStyle}
+              />
+            </label>
+          </div>
+
 
           {(search ||
+            dateFrom ||
+            dateTo ||
             selectedCompanies.length > 0 ||
             directionFilter !== "ALL" ||
             groupFilter !== "ALL" ||
+            activeStatFilter !== "ALL" ||
             Object.keys(columnFilters).length > 0) && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                clearAllFilters();
-              }}
-              style={clearSearchBtn}
-            >
-              Təmizlə
-            </button>
-          )}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  clearAllFilters();
+                }}
+                style={clearSearchBtn}
+              >
+                Təmizlə
+              </button>
+            )}
         </div>
       </section>
 
@@ -592,7 +937,8 @@ export default function CompanyDashboard() {
           <div>
             <h2 style={filterTitle}>Müqavilə bölməsi</h2>
             <p style={filterText}>
-              Admin paneldə aktiv olan bölmələr və həmin bölmələrə bağlı qruplar burada görünür.
+              Admin paneldə aktiv olan bölmələr və həmin bölmələrə bağlı
+              qruplar burada görünür.
             </p>
           </div>
         </div>
@@ -603,6 +949,7 @@ export default function CompanyDashboard() {
             onClick={() => {
               setDirectionFilter("ALL");
               setGroupFilter("ALL");
+              setActiveStatFilter("ALL");
             }}
             style={{
               ...filterButton,
@@ -619,10 +966,13 @@ export default function CompanyDashboard() {
               onClick={() => {
                 setDirectionFilter(direction.code);
                 setGroupFilter("ALL");
+                setActiveStatFilter("ALL");
               }}
               style={{
                 ...filterButton,
-                ...(directionFilter === direction.code ? filterButtonActive : {}),
+                ...(directionFilter === direction.code
+                  ? filterButtonActive
+                  : {}),
               }}
             >
               {direction.name}
@@ -680,6 +1030,7 @@ export default function CompanyDashboard() {
                 key={company}
                 onClick={(e) => {
                   e.stopPropagation();
+                  setActiveStatFilter("ALL");
 
                   setSelectedCompanies((prev) => {
                     if (prev.includes(company)) {
@@ -720,36 +1071,43 @@ export default function CompanyDashboard() {
         <div style={tableHeader}>
           <div>
             <h2 style={tableTitle}>
-              {directionFilter !== "ALL"
-                ? groupFilter === "ALL"
-                  ? `${getDirectionLabel(directionFilter)} müqavilələr`
-                  : `${getDirectionLabel(directionFilter)} / ${getGroupLabel(groupFilter)}`
-                : selectedCompanies.length > 0
-                ? `Seçilmiş şirkətlər (${selectedCompanies.length})`
-                : "Bütün müqavilələr"}
+              {activeStatFilter !== "ALL"
+                ? `${getActiveStatTitle()} müqavilələri`
+                : directionFilter !== "ALL"
+                  ? groupFilter === "ALL"
+                    ? `${getDirectionLabel(directionFilter)} müqavilələr`
+                    : `${getDirectionLabel(directionFilter)} / ${getGroupLabel(
+                      groupFilter
+                    )}`
+                  : selectedCompanies.length > 0
+                    ? `Seçilmiş şirkətlər (${selectedCompanies.length})`
+                    : "Bütün müqavilələr"}
             </h2>
 
             <p style={tableSubtitle}>
               Göstərilən nəticə: {sortedAndFilteredContracts.length} /{" "}
-              {contracts.length} · PDF-i olan: {pdfCount}
+              {contracts.length} · Faylı olan: {pdfCount}
             </p>
           </div>
 
           {(selectedCompanies.length > 0 ||
+            dateFrom ||
+            dateTo ||
             directionFilter !== "ALL" ||
             groupFilter !== "ALL" ||
+            activeStatFilter !== "ALL" ||
             Object.keys(columnFilters).length > 0) && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                clearAllFilters();
-              }}
-              style={clearFilterBtn}
-            >
-              Filteri təmizlə
-            </button>
-          )}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  clearAllFilters();
+                }}
+                style={clearFilterBtn}
+              >
+                Filteri təmizlə
+              </button>
+            )}
         </div>
 
         {sortedAndFilteredContracts.length === 0 ? (
@@ -780,6 +1138,18 @@ export default function CompanyDashboard() {
                     />
 
                     <FilterTh
+                      label="Şirkət VÖEN"
+                      columnKey="company_voen"
+                      openFilterKey={openFilterKey}
+                      setOpenFilterKey={setOpenFilterKey}
+                      values={getAvailableColumnValues("company_voen")}
+                      selectedValues={columnFilters.company_voen || []}
+                      onToggle={toggleColumnFilter}
+                      onClear={clearColumnFilter}
+                      active={isColumnFilterActive("company_voen")}
+                    />
+
+                    <FilterTh
                       label="Müqavilə"
                       columnKey="counterparty"
                       openFilterKey={openFilterKey}
@@ -789,6 +1159,30 @@ export default function CompanyDashboard() {
                       onToggle={toggleColumnFilter}
                       onClear={clearColumnFilter}
                       active={isColumnFilterActive("counterparty")}
+                    />
+
+                    <FilterTh
+                      label="Qarşı VÖEN"
+                      columnKey="counterparty_voen"
+                      openFilterKey={openFilterKey}
+                      setOpenFilterKey={setOpenFilterKey}
+                      values={getAvailableColumnValues("counterparty_voen")}
+                      selectedValues={columnFilters.counterparty_voen || []}
+                      onToggle={toggleColumnFilter}
+                      onClear={clearColumnFilter}
+                      active={isColumnFilterActive("counterparty_voen")}
+                    />
+
+                    <FilterTh
+                      label="Yaradan"
+                      columnKey="created_by_name"
+                      openFilterKey={openFilterKey}
+                      setOpenFilterKey={setOpenFilterKey}
+                      values={getAvailableColumnValues("created_by_name")}
+                      selectedValues={columnFilters.created_by_name || []}
+                      onToggle={toggleColumnFilter}
+                      onClear={clearColumnFilter}
+                      active={isColumnFilterActive("created_by_name")}
                     />
 
                     <FilterTh
@@ -873,7 +1267,25 @@ export default function CompanyDashboard() {
                         </td>
 
                         <td style={tdStyle}>
+                          <span style={counterpartyText}>
+                            {c.company_voen || "-"}
+                          </span>
+                        </td>
+
+                        <td style={tdStyle}>
                           <span style={counterpartyText}>{c.counterparty}</span>
+                        </td>
+
+                        <td style={tdStyle}>
+                          <span style={counterpartyText}>
+                            {c.counterparty_voen || "-"}
+                          </span>
+                        </td>
+
+                        <td style={tdStyle}>
+                          <span style={counterpartyText}>
+                            {c.created_by_name || "-"}
+                          </span>
                         </td>
 
                         <td style={tdStyle}>
@@ -899,15 +1311,14 @@ export default function CompanyDashboard() {
                         </td>
 
                         <td style={tdStyle}>
-                          {c.file_url ? (
-                            <a
-                              href={c.file_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                          {getContractFilePath(c) ? (
+                            <button
+                              type="button"
+                              onClick={() => openContractFile(c)}
                               style={pdfBtn}
                             >
-                              Pdf bax
-                            </a>
+                              {getFileLabel(c)}
+                            </button>
                           ) : (
                             <span style={noPdfBadge}>N/A</span>
                           )}
@@ -966,8 +1377,16 @@ export default function CompanyDashboard() {
                         </span>
 
                         <div>
-                          <span style={mobileCompanyName}>{c.company_name}</span>
+                          <span style={mobileCompanyName}>
+                            {c.company_name} · VÖEN: {c.company_voen || "-"}
+                          </span>
                           <h3 style={mobileContractTitle}>{c.counterparty}</h3>
+                          <p style={mobileSmallText}>
+                            Qarşı VÖEN: {c.counterparty_voen || "-"}
+                          </p>
+                          <p style={mobileSmallText}>
+                            Yaradan: {c.created_by_name || "-"}
+                          </p>
                         </div>
                       </div>
 
@@ -1009,15 +1428,14 @@ export default function CompanyDashboard() {
                         )}
                       </div>
 
-                      {c.file_url && (
-                        <a
-                          href={c.file_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                      {getContractFilePath(c) && (
+                        <button
+                          type="button"
+                          onClick={() => openContractFile(c)}
                           style={pdfBtn}
                         >
-                          Pdf bax
-                        </a>
+                          {getFileLabel(c)}
+                        </button>
                       )}
                     </div>
 
@@ -1025,38 +1443,38 @@ export default function CompanyDashboard() {
                       {permissions.some(
                         (p) => p.company_id === c.company_id && p.can_delete
                       ) && (
-                        <button
-                          onClick={() => deleteContract(c.id)}
-                          style={deleteBtn}
-                          type="button"
-                        >
-                          Sil
-                        </button>
-                      )}
+                          <button
+                            onClick={() => deleteContract(c.id)}
+                            style={deleteBtn}
+                            type="button"
+                          >
+                            Sil
+                          </button>
+                        )}
 
                       {permissions.some(
                         (p) => p.company_id === c.company_id && p.can_archive
                       ) && (
-                        <button
-                          onClick={() => archiveContract(c.id)}
-                          style={archiveBtn}
-                          type="button"
-                        >
-                          Arxiv
-                        </button>
-                      )}
+                          <button
+                            onClick={() => archiveContract(c.id)}
+                            style={archiveBtn}
+                            type="button"
+                          >
+                            Arxiv
+                          </button>
+                        )}
 
                       {permissions.some(
                         (p) => p.company_id === c.company_id && p.can_edit
                       ) && (
-                        <button
-                          onClick={() => openEditModal(c)}
-                          style={editBtn}
-                          type="button"
-                        >
-                          Edit
-                        </button>
-                      )}
+                          <button
+                            onClick={() => openEditModal(c)}
+                            style={editBtn}
+                            type="button"
+                          >
+                            Edit
+                          </button>
+                        )}
                     </div>
                   </div>
                 );
@@ -1141,6 +1559,22 @@ export default function CompanyDashboard() {
               </div>
 
               <div style={modalField}>
+                <label style={modalLabel}>Şirkət VÖEN</label>
+
+                <input
+                  value={editingContract.company_voen || ""}
+                  onChange={(e) =>
+                    setEditingContract({
+                      ...editingContract,
+                      company_voen: e.target.value,
+                    })
+                  }
+                  placeholder="Şirkət VÖEN"
+                  style={inputStyle}
+                />
+              </div>
+
+              <div style={modalField}>
                 <label style={modalLabel}>Counterparty</label>
 
                 <input
@@ -1152,6 +1586,22 @@ export default function CompanyDashboard() {
                     })
                   }
                   placeholder="Counterparty"
+                  style={inputStyle}
+                />
+              </div>
+
+              <div style={modalField}>
+                <label style={modalLabel}>Qarşı tərəf VÖEN</label>
+
+                <input
+                  value={editingContract.counterparty_voen || ""}
+                  onChange={(e) =>
+                    setEditingContract({
+                      ...editingContract,
+                      counterparty_voen: e.target.value,
+                    })
+                  }
+                  placeholder="Qarşı tərəf VÖEN"
                   style={inputStyle}
                 />
               </div>
@@ -1193,12 +1643,18 @@ export default function CompanyDashboard() {
                     })
                   }
                   style={inputStyle}
-                  disabled={getGroupsForDirection(editingContract.contract_direction).length === 0}
+                  disabled={
+                    getGroupsForDirection(editingContract.contract_direction)
+                      .length === 0
+                  }
                 >
-                  {getGroupsForDirection(editingContract.contract_direction).length === 0 ? (
+                  {getGroupsForDirection(editingContract.contract_direction)
+                    .length === 0 ? (
                     <option value="">Bu bölmədə aktiv qrup yoxdur</option>
                   ) : (
-                    getGroupsForDirection(editingContract.contract_direction).map((group) => (
+                    getGroupsForDirection(
+                      editingContract.contract_direction
+                    ).map((group) => (
                       <option key={group.id} value={group.code}>
                         {group.name}
                       </option>
@@ -1291,6 +1747,45 @@ export default function CompanyDashboard() {
   );
 }
 
+type StatCardProps = {
+  icon: string;
+  label: string;
+  value: string | number;
+  hint: string;
+  active: boolean;
+  onClick: () => void;
+  iconStyle: CSSProperties;
+};
+
+function StatCard({
+  icon,
+  label,
+  value,
+  hint,
+  active,
+  onClick,
+  iconStyle,
+}: StatCardProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        ...statCardButton,
+        ...(active ? statCardButtonActive : {}),
+      }}
+    >
+      <div style={statTop}>
+        <span style={iconStyle}>{icon}</span>
+        <span style={statLabel}>{label}</span>
+      </div>
+
+      <strong style={statValue}>{value}</strong>
+      <span style={statHint}>{hint}</span>
+    </button>
+  );
+}
+
 type FilterThProps = {
   label: string;
   columnKey: keyof Contract;
@@ -1375,7 +1870,6 @@ function FilterTh({
     </th>
   );
 }
-
 
 function expiryBadge(days: number) {
   if (days <= 7) return <span style={dangerBadge}>7 Gün</span>;
@@ -1538,6 +2032,20 @@ const statCard: CSSProperties = {
   backdropFilter: "blur(12px)",
 };
 
+const statCardButton: CSSProperties = {
+  ...statCard,
+  width: "100%",
+  textAlign: "left",
+  cursor: "pointer",
+  transition: "0.2s",
+};
+
+const statCardButtonActive: CSSProperties = {
+  border: "1px solid rgba(37,99,235,0.45)",
+  boxShadow: "0 22px 52px rgba(37,99,235,0.18)",
+  transform: "translateY(-2px)",
+};
+
 const statTop: CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -1639,15 +2147,17 @@ const toolbarText: CSSProperties = {
 };
 
 const toolbarRight: CSSProperties = {
-  display: "flex",
+  // display: "flex",
   alignItems: "center",
   gap: 10,
   flex: "1 1 420px",
+  flexWrap: "wrap",
+  minWidth: 0,
 };
 
 const searchWrap: CSSProperties = {
-  flex: 1,
-  minWidth: 260,
+  flex: "1 1 260px",
+  minWidth: 0,
   position: "relative",
 };
 
@@ -1913,7 +2423,7 @@ const tableStyle: CSSProperties = {
   width: "100%",
   borderCollapse: "separate",
   borderSpacing: 0,
-  minWidth: 1080,
+  minWidth: 1500,
   background: "#fff",
 };
 
@@ -1931,18 +2441,6 @@ const thStyle: CSSProperties = {
   letterSpacing: "0.04em",
   borderBottom: "1px solid #e2e8f0",
   whiteSpace: "nowrap",
-};
-
-const thInner: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 7,
-};
-
-const sortMark: CSSProperties = {
-  color: "#94a3b8",
-  fontSize: 13,
-  fontWeight: 900,
 };
 
 const rowStyle: CSSProperties = {
@@ -2097,6 +2595,8 @@ const pdfBtn: CSSProperties = {
   fontWeight: 900,
   boxShadow: "0 10px 22px rgba(37,99,235,0.22)",
   whiteSpace: "nowrap",
+  border: "none",
+  cursor: "pointer",
 };
 
 const actionGroup: CSSProperties = {
@@ -2234,6 +2734,13 @@ const mobileContractTitle: CSSProperties = {
   fontWeight: 950,
   lineHeight: 1.35,
   letterSpacing: "-0.025em",
+};
+
+const mobileSmallText: CSSProperties = {
+  margin: "4px 0 0",
+  color: "#64748b",
+  fontSize: 12,
+  fontWeight: 750,
 };
 
 const mobileMetaRow: CSSProperties = {
@@ -2494,7 +3001,6 @@ const cancelBtn: CSSProperties = {
   fontWeight: 950,
 };
 
-
 const filterThWrap: CSSProperties = {
   position: "relative",
   display: "inline-flex",
@@ -2673,4 +3179,35 @@ const loadingText: CSSProperties = {
   color: "#64748b",
   fontSize: 14,
   lineHeight: 1.6,
+};
+const dateFilterWrap: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  flex: "1 1 260px",
+  flexWrap: "wrap",
+  minWidth: 0,
+};
+
+const dateLabel: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 5,
+  color: "#475569",
+  fontSize: 12,
+  fontWeight: 900,
+  flex: "1 1 120px",
+  minWidth: 0,
+};
+
+const dateInputStyle: CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "12px 13px",
+  borderRadius: 15,
+  border: "1px solid #cbd5e1",
+  background: "#fff",
+  color: "#0f172a",
+  fontSize: 13,
+  outline: "none",
 };

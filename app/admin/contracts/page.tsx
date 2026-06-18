@@ -2,34 +2,134 @@
 
 import { useEffect, useState, type CSSProperties } from "react";
 import { supabase } from "@/lib/supabase";
+import { createAuditLog } from "@/lib/auditlog";
+import PizZip from "pizzip";
+import Docxtemplater from "docxtemplater";
 
 type Contract = {
   id: string;
   counterparty: string;
+  counterparty_voen?: string | null;
+  company_id?: string | null;
+  company_name?: string | null;
+  company_voen?: string | null;
   start_date: string;
   end_date: string;
   file_url: string | null;
   auto_renew: boolean;
   status: "active" | "archived";
+  created_by?: string | null;
+  created_by_name?: string | null;
+  template_id?: string | null;
+  template_name?: string | null;
+  template_file_path?: string | null;
+  generated_file_path?: string | null;
+  contract_number?: string | null;
+  amount?: string | null;
+  currency?: string | null;
+  subject?: string | null;
 };
 
 type Company = {
   id: string;
   name: string;
+  voen?: string | null;
 };
+
+type ContractTemplate = {
+  id: string;
+  name: string;
+  description: string | null;
+  file_url: string | null;
+  file_path: string | null;
+  template_type: string | null;
+  is_active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+const TEMPLATE_BUCKET = "contract-templates";
 
 export default function ContractsPage() {
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [templates, setTemplates] = useState<ContractTemplate[]>([]);
   const [tab, setTab] = useState<"active" | "archived">("active");
 
   const [counterparty, setCounterparty] = useState("");
+  const [counterpartyVoen, setCounterpartyVoen] = useState("");
   const [companyId, setCompanyId] = useState("");
+  const [manualCompanyVoen, setManualCompanyVoen] = useState("");
   const [startDate, setStartDate] = useState("");
   const [duration, setDuration] = useState("12");
   const [autoRenew, setAutoRenew] = useState(false);
   const [file, setFile] = useState<File | null>(null);
+  const [templateId, setTemplateId] = useState("");
+  const [contractNumber, setContractNumber] = useState("");
+  const [amount, setAmount] = useState("");
+  const [currency, setCurrency] = useState("AZN");
+  const [subject, setSubject] = useState("");
+  const [generating, setGenerating] = useState(false);
   const [editingContract, setEditingContract] = useState<any>(null);
+
+  function getProfileName(profile: any) {
+    if (!profile) return "-";
+
+    const firstLast = `${profile.first_name || ""} ${
+      profile.last_name || ""
+    }`.trim();
+
+    return (
+      profile.full_name ||
+      firstLast ||
+      profile.name ||
+      profile.display_name ||
+      profile.email ||
+      "-"
+    );
+  }
+
+  async function enrichContractsWithCreators(rows: any[]) {
+    const creatorIds = Array.from(
+      new Set(
+        rows
+          .map((c) => c.created_by)
+          .filter((id): id is string => Boolean(id))
+      )
+    );
+
+    if (creatorIds.length === 0) {
+      return rows.map((c) => ({
+        ...c,
+        created_by_name: "-",
+      }));
+    }
+
+    const { data: profiles, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .in("id", creatorIds);
+
+    if (error) {
+      console.error("Creator profiles load error:", error);
+      return rows.map((c) => ({
+        ...c,
+        created_by_name: c.created_by || "-",
+      }));
+    }
+
+    const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
+
+    return rows.map((c) => {
+      const profile = c.created_by ? profileMap.get(c.created_by) : null;
+
+      return {
+        ...c,
+        created_by_name: getProfileName(profile),
+      };
+    });
+  }
 
   async function loadContracts() {
     const { data } = await supabase
@@ -38,12 +138,51 @@ export default function ContractsPage() {
       .eq("status", tab)
       .order("created_at", { ascending: false });
 
-    if (data) setContracts(data as Contract[]);
+    if (data) {
+      const enrichedContracts = await enrichContractsWithCreators(data);
+      setContracts(enrichedContracts as Contract[]);
+    }
   }
 
   async function loadCompanies() {
-    const { data } = await supabase.from("companies").select("*");
-    if (data) setCompanies(data);
+    const { data, error } = await supabase.from("companies").select("*");
+
+    if (error) {
+      console.error(error);
+      alert("Şirkətlər yüklənmədi");
+      return;
+    }
+
+    if (data) {
+      setCompanies(
+        data.map((c: any) => ({
+          id: c.id,
+          name: c.name || c.company_name || c.title || "Adsız şirkət",
+          voen: c.voen || null,
+        }))
+      );
+    }
+  }
+
+  async function loadTemplates() {
+    const { data, error } = await supabase
+      .from("contract_templates")
+      .select("*")
+      .eq("is_active", true)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error(error);
+      alert("Şablonlar yüklənmədi");
+      return;
+    }
+
+    const safeTemplates = (data || []) as ContractTemplate[];
+    setTemplates(safeTemplates);
+
+    if (safeTemplates.length > 0 && !templateId) {
+      setTemplateId(safeTemplates[0].id);
+    }
   }
 
   function calculateEndDate(start: string, months: number) {
@@ -70,21 +209,295 @@ export default function ContractsPage() {
     return fileName;
   }
 
+  function formatDateForTemplate(value: string | null) {
+    if (!value) return "";
+
+    const date = new Date(`${value}T00:00:00`);
+
+    if (Number.isNaN(date.getTime())) return value;
+
+    return `${String(date.getDate()).padStart(2, "0")}.${String(
+      date.getMonth() + 1
+    ).padStart(2, "0")}.${date.getFullYear()}`;
+  }
+
+  async function getTemplateArrayBuffer(template: ContractTemplate) {
+    if (!template.file_path && !template.file_url) {
+      throw new Error("Şablon faylı tapılmadı");
+    }
+
+    if (template.file_path) {
+      const { data, error } = await supabase.storage
+        .from(TEMPLATE_BUCKET)
+        .download(template.file_path);
+
+      if (error || !data) {
+        throw error || new Error("Şablon faylı yüklənmədi");
+      }
+
+      return await data.arrayBuffer();
+    }
+
+    const res = await fetch(template.file_url as string);
+
+    if (!res.ok) {
+      throw new Error("Şablon faylı oxunmadı");
+    }
+
+    return await res.arrayBuffer();
+  }
+
+  async function generateContractFromTemplate({
+    template,
+    payload,
+  }: {
+    template: ContractTemplate;
+    payload: Record<string, any>;
+  }) {
+    const templateFileName = (template.file_path || template.file_url || "")
+      .toString()
+      .toLowerCase();
+
+    if (!templateFileName.endsWith(".docx")) {
+      return null;
+    }
+
+    const arrayBuffer = await getTemplateArrayBuffer(template);
+    const zip = new PizZip(arrayBuffer);
+
+    const doc = new Docxtemplater(zip, {
+      paragraphLoop: true,
+      linebreaks: true,
+      delimiters: {
+        start: "{{",
+        end: "}}",
+      },
+    });
+
+    doc.render(payload);
+
+    const generatedBlob = doc.getZip().generate({
+      type: "blob",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+
+    const safeCounterparty = (payload.counterparty || "muqavile")
+      .toString()
+      .trim()
+      .replace(/[^a-zA-Z0-9ƏÖÜĞŞÇİəöüğşçı]+/g, "-")
+      .replace(/-+/g, "-");
+
+    const generatedPath = `generated/${Date.now()}-${safeCounterparty}.docx`;
+
+    const { error } = await supabase.storage
+      .from("contracts")
+      .upload(generatedPath, generatedBlob, {
+        contentType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        upsert: false,
+      });
+
+    if (error) throw error;
+
+    return generatedPath;
+  }
+
+  async function generateContractFromManualDocx({
+    selectedFile,
+    payload,
+  }: {
+    selectedFile: File;
+    payload: Record<string, any>;
+  }) {
+    const fileName = selectedFile.name.toLowerCase();
+
+    if (!fileName.endsWith(".docx")) {
+      return null;
+    }
+
+    const arrayBuffer = await selectedFile.arrayBuffer();
+    const zip = new PizZip(arrayBuffer);
+
+    const doc = new Docxtemplater(zip, {
+      paragraphLoop: true,
+      linebreaks: true,
+      delimiters: {
+        start: "{{",
+        end: "}}",
+      },
+    });
+
+    doc.render(payload);
+
+    const generatedBlob = doc.getZip().generate({
+      type: "blob",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+
+    const safeCounterparty = (payload.counterparty || "muqavile")
+      .toString()
+      .trim()
+      .replace(/[^a-zA-Z0-9ƏÖÜĞŞÇİəöüğşçı]+/g, "-")
+      .replace(/-+/g, "-");
+
+    const generatedPath = `generated/${Date.now()}-${safeCounterparty}.docx`;
+
+    const { error } = await supabase.storage
+      .from("contracts")
+      .upload(generatedPath, generatedBlob, {
+        contentType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        upsert: false,
+      });
+
+    if (error) throw error;
+
+    return generatedPath;
+  }
+
   async function addContract() {
-    if (!counterparty || !companyId || !startDate) return;
+    const monthCount = parseInt(duration);
+    const selectedCompany = companies.find((c) => c.id === companyId);
+    const effectiveCompanyVoen = selectedCompany?.voen?.trim()
+      ? selectedCompany.voen.trim()
+      : manualCompanyVoen.trim();
 
-    const endDate = calculateEndDate(startDate, parseInt(duration));
-    const fileName = await uploadFile();
+    if (
+      !counterparty.trim() ||
+      !counterpartyVoen.trim() ||
+      !companyId ||
+      !effectiveCompanyVoen ||
+      !startDate ||
+      isNaN(monthCount) ||
+      monthCount <= 0
+    ) {
+      alert("Zəhmət olmasa bütün xanaları düzgün doldurun");
+      return;
+    }
 
-    await supabase.from("contracts").insert({
-      counterparty,
+    const { data: userData } = await supabase.auth.getUser();
+    const userId = userData.user?.id;
+
+    if (!userId) {
+      alert("İstifadəçi tapılmadı");
+      return;
+    }
+
+    const endDate = calculateEndDate(startDate, monthCount);
+    const selectedTemplate = templates.find((template) => template.id === templateId);
+
+    setGenerating(true);
+
+    let fileName: string | null = null;
+
+    try {
+      const templatePayload = {
+        template_name: selectedTemplate?.name || file?.name || "",
+        template_type: selectedTemplate?.template_type || "Müqavilə",
+        template_kind: selectedTemplate?.template_type || "",
+        created_date: formatDateForTemplate(new Date().toISOString().split("T")[0]),
+        created_by: userData.user?.email || "",
+        company_name: selectedCompany?.name || "",
+        company_voen: effectiveCompanyVoen,
+        counterparty: counterparty.trim(),
+        counterparty_voen: counterpartyVoen.trim(),
+        contract_number: contractNumber.trim(),
+        contract_date: formatDateForTemplate(startDate),
+        start_date: formatDateForTemplate(startDate),
+        end_date: formatDateForTemplate(endDate),
+        amount: amount.trim(),
+        currency,
+        status: "Aktiv",
+        subject: subject.trim(),
+        auto_renew: autoRenew ? "Bəli" : "Xeyr",
+        duration_month: monthCount,
+      };
+
+      const templateFileName = (
+        selectedTemplate?.file_path ||
+        selectedTemplate?.file_url ||
+        ""
+      )
+        .toString()
+        .toLowerCase();
+
+      if (selectedTemplate && templateFileName.endsWith(".docx")) {
+        fileName = await generateContractFromTemplate({
+          template: selectedTemplate,
+          payload: templatePayload,
+        });
+      } else if (file && file.name.toLowerCase().endsWith(".docx")) {
+        fileName = await generateContractFromManualDocx({
+          selectedFile: file,
+          payload: templatePayload,
+        });
+      } else if (selectedTemplate) {
+        alert(
+          "Seçilən şablon PDF-dir. Avtomatik doldurma üçün ya Şablonlar səhifəsində həmin şablonu DOCX kimi yenidən yüklə, ya da bu formada DOCX fayl seç."
+        );
+        setGenerating(false);
+        return;
+      } else {
+        fileName = await uploadFile();
+      }
+    } catch (err: any) {
+      alert(
+        err?.message ||
+          "Şablondan müqavilə faylı yaradılmadı. DOCX şablonunda {{...}} dəyişənlərini yoxlayın."
+      );
+      setGenerating(false);
+      return;
+    }
+
+    setGenerating(false);
+
+    const newContractPayload = {
+      counterparty: counterparty.trim(),
+      counterparty_voen: counterpartyVoen.trim(),
       company_id: companyId,
+      company_name: selectedCompany?.name || null,
+      company_voen: effectiveCompanyVoen,
       start_date: startDate,
       end_date: endDate,
-      duration_month: parseInt(duration),
+      duration_month: monthCount,
       auto_renew: autoRenew,
       file_url: fileName,
       status: "active",
+      created_by: userId,
+      template_id: selectedTemplate?.id || null,
+      template_name: selectedTemplate?.name || null,
+      template_file_path: selectedTemplate?.file_path || null,
+      generated_file_path:
+        selectedTemplate || file?.name.toLowerCase().endsWith(".docx")
+          ? fileName
+          : null,
+      contract_number: contractNumber.trim() || null,
+      amount: amount.trim() || null,
+      currency,
+      subject: subject.trim() || null,
+    };
+
+    const { data: insertedContract, error } = await supabase
+      .from("contracts")
+      .insert(newContractPayload)
+      .select("*")
+      .single();
+
+    if (error) {
+      console.error(error);
+      alert("Müqavilə əlavə olunmadı");
+      return;
+    }
+
+    await createAuditLog({
+      action: "CREATE_CONTRACT",
+      tableName: "contracts",
+      recordId: insertedContract?.id || null,
+      description: `Yeni müqavilə yaradıldı: ${newContractPayload.counterparty}`,
+      oldData: null,
+      newData: insertedContract || newContractPayload,
     });
 
     resetForm();
@@ -95,13 +508,61 @@ export default function ContractsPage() {
     const confirmDelete = confirm("Muqavile arxive gonderilsin?");
     if (!confirmDelete) return;
 
-    await supabase.from("contracts").update({ status: "archived" }).eq("id", id);
+    const oldContract = contracts.find((c) => c.id === id) || null;
+
+    const { data: updatedContract, error } = await supabase
+      .from("contracts")
+      .update({ status: "archived" })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) {
+      console.error(error);
+      alert("Arxivə göndərilmədi");
+      return;
+    }
+
+    await createAuditLog({
+      action: "ARCHIVE_CONTRACT",
+      tableName: "contracts",
+      recordId: id,
+      description: `Müqavilə arxivə göndərildi: ${
+        oldContract?.counterparty || updatedContract?.counterparty || id
+      }`,
+      oldData: oldContract,
+      newData: updatedContract,
+    });
 
     loadContracts();
   }
 
   async function restoreContract(id: string) {
-    await supabase.from("contracts").update({ status: "active" }).eq("id", id);
+    const oldContract = contracts.find((c) => c.id === id) || null;
+
+    const { data: updatedContract, error } = await supabase
+      .from("contracts")
+      .update({ status: "active" })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) {
+      console.error(error);
+      alert("Müqavilə geri qaytarılmadı");
+      return;
+    }
+
+    await createAuditLog({
+      action: "RESTORE_CONTRACT",
+      tableName: "contracts",
+      recordId: id,
+      description: `Müqavilə geri qaytarıldı: ${
+        oldContract?.counterparty || updatedContract?.counterparty || id
+      }`,
+      oldData: oldContract,
+      newData: updatedContract,
+    });
 
     loadContracts();
   }
@@ -110,6 +571,8 @@ export default function ContractsPage() {
     const confirmDelete = confirm("Bu muqavile tam silinsin?");
     if (!confirmDelete) return;
 
+    const oldContract = contracts.find((c) => c.id === id) || null;
+
     const { error } = await supabase.from("contracts").delete().eq("id", id);
 
     if (error) {
@@ -117,6 +580,15 @@ export default function ContractsPage() {
       console.log("DELETE ERROR:", error);
       return;
     }
+
+    await createAuditLog({
+      action: "DELETE_CONTRACT",
+      tableName: "contracts",
+      recordId: id,
+      description: `Müqavilə silindi: ${oldContract?.counterparty || id}`,
+      oldData: oldContract,
+      newData: null,
+    });
 
     loadContracts();
   }
@@ -128,30 +600,67 @@ export default function ContractsPage() {
       (c) => c.id === editingContract.company_id
     );
 
-    const { error } = await supabase
-      .from("contracts")
-      .update({
-        counterparty: editingContract.counterparty,
-        start_date: editingContract.start_date,
-        end_date: editingContract.end_date,
-        company_id: editingContract.company_id,
-        company_name: selectedCompany?.name || null,
-      })
-      .eq("id", editingContract.id);
+    const effectiveCompanyVoen = selectedCompany?.voen?.trim()
+      ? selectedCompany.voen.trim()
+      : editingContract.company_voen || null;
 
-    if (!error) {
-      setEditingContract(null);
-      loadContracts();
+    const oldContract =
+      contracts.find((contract) => contract.id === editingContract.id) || null;
+
+    const updatePayload = {
+      counterparty: editingContract.counterparty,
+      counterparty_voen: editingContract.counterparty_voen || null,
+      start_date: editingContract.start_date,
+      end_date: editingContract.end_date,
+      company_id: editingContract.company_id,
+      company_name: selectedCompany?.name || editingContract.company_name || null,
+      company_voen: effectiveCompanyVoen,
+      contract_number: editingContract.contract_number || null,
+      amount: editingContract.amount || null,
+      currency: editingContract.currency || "AZN",
+      subject: editingContract.subject || null,
+    };
+
+    const { data: updatedContract, error } = await supabase
+      .from("contracts")
+      .update(updatePayload)
+      .eq("id", editingContract.id)
+      .select("*")
+      .single();
+
+    if (error) {
+      console.error(error);
+      alert("Müqavilə yenilənmədi");
+      return;
     }
+
+    await createAuditLog({
+      action: "UPDATE_CONTRACT",
+      tableName: "contracts",
+      recordId: editingContract.id,
+      description: `Müqavilə yeniləndi: ${updatePayload.counterparty}`,
+      oldData: oldContract,
+      newData: updatedContract || updatePayload,
+    });
+
+    setEditingContract(null);
+    loadContracts();
   }
 
   function resetForm() {
     setCounterparty("");
+    setCounterpartyVoen("");
     setCompanyId("");
+    setManualCompanyVoen("");
     setStartDate("");
     setDuration("12");
     setAutoRenew(false);
     setFile(null);
+    setTemplateId(templates[0]?.id || "");
+    setContractNumber("");
+    setAmount("");
+    setCurrency("AZN");
+    setSubject("");
   }
 
   useEffect(() => {
@@ -160,7 +669,14 @@ export default function ContractsPage() {
 
   useEffect(() => {
     loadCompanies();
+    loadTemplates();
   }, []);
+
+  const selectedCompany = companies.find((c) => c.id === companyId);
+  const selectedTemplate = templates.find((template) => template.id === templateId);
+  const selectedCompanyVoen = selectedCompany?.voen?.trim()
+    ? selectedCompany.voen
+    : manualCompanyVoen;
 
   return (
     <div className="admin-contracts-page" style={pageStyle}>
@@ -235,7 +751,7 @@ export default function ContractsPage() {
             <div>
               <h2 style={sectionTitle}>Yeni müqavilə əlavə et</h2>
               <p style={sectionText}>
-                Müqavilə məlumatlarını daxil edin və PDF faylını əlavə edin.
+                Müqavilə məlumatlarını daxil edin, DOCX şablon seçin və sistem həmin şablonu avtomatik doldursun.
               </p>
             </div>
 
@@ -250,9 +766,19 @@ export default function ContractsPage() {
               style={inputStyle}
             />
 
+            <input
+              placeholder="Qarşı tərəfin VÖEN-i"
+              value={counterpartyVoen}
+              onChange={(e) => setCounterpartyVoen(e.target.value)}
+              style={inputStyle}
+            />
+
             <select
               value={companyId}
-              onChange={(e) => setCompanyId(e.target.value)}
+              onChange={(e) => {
+                setCompanyId(e.target.value);
+                setManualCompanyVoen("");
+              }}
               style={inputStyle}
             >
               <option value="">Şirkət seçin</option>
@@ -262,6 +788,22 @@ export default function ContractsPage() {
                 </option>
               ))}
             </select>
+
+            <input
+              placeholder={
+                selectedCompany?.voen?.trim()
+                  ? "Seçilən şirkətin VÖEN-i"
+                  : "Şirkətin VÖEN-i"
+              }
+              value={selectedCompanyVoen || ""}
+              onChange={(e) => setManualCompanyVoen(e.target.value)}
+              readOnly={!!selectedCompany?.voen?.trim()}
+              style={{
+                ...inputStyle,
+                background: selectedCompany?.voen?.trim() ? "#f8fafc" : "#fff",
+                cursor: selectedCompany?.voen?.trim() ? "not-allowed" : "text",
+              }}
+            />
 
             <input
               type="date"
@@ -282,7 +824,69 @@ export default function ContractsPage() {
               <option value="24">2 il</option>
               <option value="36">3 il</option>
             </select>
+
+            <select
+              value={templateId}
+              onChange={(e) => setTemplateId(e.target.value)}
+              style={inputStyle}
+            >
+              <option value="">Şablonsuz / faylı əl ilə yüklə</option>
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name}
+                  {template.template_type ? ` / ${template.template_type}` : ""}
+                </option>
+              ))}
+            </select>
+
+            <input
+              placeholder="Müqavilə nömrəsi"
+              value={contractNumber}
+              onChange={(e) => setContractNumber(e.target.value)}
+              style={inputStyle}
+            />
+
+            <input
+              placeholder="Məbləğ"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              style={inputStyle}
+            />
+
+            <select
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value)}
+              style={inputStyle}
+            >
+              <option value="AZN">AZN</option>
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
+            </select>
+
+            <textarea
+              placeholder="Müqavilənin predmeti"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              style={textareaStyle}
+            />
           </div>
+
+          {selectedTemplate && (
+            <div style={templateInfoBox}>
+              <div>
+                <strong style={templateInfoTitle}>Seçilən şablon</strong>
+                <p style={templateInfoText}>
+                  {selectedTemplate.name}
+                  {selectedTemplate.template_type
+                    ? ` / ${selectedTemplate.template_type}`
+                    : ""}
+                </p>
+                <p style={templateInfoDescription}>
+                  {"Avtomatik doldurma üçün şablon DOCX olmalıdır. Əgər seçilən şablon köhnədən PDF yüklənibsə, aşağıdan DOCX faylı seçə bilərsən. DOCX-də {{company_name}}, {{company_voen}}, {{counterparty}}, {{counterparty_voen}}, {{start_date}}, {{end_date}}, {{contract_number}}, {{amount}}, {{currency}}, {{subject}} yerləri doldurulacaq."}
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="contracts-form-bottom" style={formBottom}>
             <label style={checkboxLabel}>
@@ -297,17 +901,26 @@ export default function ContractsPage() {
             <input
               type="file"
               id="pdfUpload"
-              accept="application/pdf"
+              accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               onChange={(e) => setFile(e.target.files?.[0] || null)}
               style={{ display: "none" }}
             />
 
             <label htmlFor="pdfUpload" style={fileButton}>
-              📎 {file ? file.name : "PDF seç"}
+              📎 {file ? file.name : selectedTemplate ? "Şablon seçilib" : "Fayl seç"}
             </label>
 
-            <button onClick={addContract} style={addButton} type="button">
-              ＋ Əlavə et
+            <button
+              onClick={addContract}
+              style={{
+                ...addButton,
+                opacity: generating ? 0.75 : 1,
+                cursor: generating ? "not-allowed" : "pointer",
+              }}
+              disabled={generating}
+              type="button"
+            >
+              {generating ? "Şablon doldurulur..." : "＋ Əlavə et"}
             </button>
           </div>
         </section>
@@ -349,6 +962,17 @@ export default function ContractsPage() {
                       <b style={contractTitle}>{c.counterparty}</b>
                       <div style={contractDate}>
                         {c.start_date} → {c.end_date}
+                      </div>
+                      <div style={contractDate}>
+                        Şirkət: {c.company_name || "-"} · VÖEN: {c.company_voen || "-"}
+                      </div>
+                      <div style={contractDate}>
+                        Qarşı tərəf VÖEN: {c.counterparty_voen || "-"} · Yaradan:{" "}
+                        {c.created_by_name || "-"}
+                      </div>
+                      <div style={contractDate}>
+                        Şablon: {c.template_name || "-"} · Nömrə:{" "}
+                        {c.contract_number || "-"}
                       </div>
                     </div>
                   </div>
@@ -441,17 +1065,37 @@ export default function ContractsPage() {
                     counterparty: e.target.value,
                   })
                 }
+                placeholder="Müqavilə / qarşı tərəf"
+                style={modalInput}
+              />
+
+              <input
+                value={editingContract.counterparty_voen || ""}
+                onChange={(e) =>
+                  setEditingContract({
+                    ...editingContract,
+                    counterparty_voen: e.target.value,
+                  })
+                }
+                placeholder="Qarşı tərəfin VÖEN-i"
                 style={modalInput}
               />
 
               <select
                 value={editingContract.company_id || ""}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const nextCompany = companies.find(
+                    (company) => company.id === e.target.value
+                  );
+
                   setEditingContract({
                     ...editingContract,
                     company_id: e.target.value,
-                  })
-                }
+                    company_name: nextCompany?.name || editingContract.company_name,
+                    company_voen:
+                      nextCompany?.voen || editingContract.company_voen || "",
+                  });
+                }}
                 style={modalInput}
               >
                 <option value="">Şirkət seç</option>
@@ -461,6 +1105,69 @@ export default function ContractsPage() {
                   </option>
                 ))}
               </select>
+
+              <input
+                value={editingContract.company_voen || ""}
+                onChange={(e) =>
+                  setEditingContract({
+                    ...editingContract,
+                    company_voen: e.target.value,
+                  })
+                }
+                placeholder="Şirkətin VÖEN-i"
+                style={modalInput}
+              />
+
+              <input
+                value={editingContract.contract_number || ""}
+                onChange={(e) =>
+                  setEditingContract({
+                    ...editingContract,
+                    contract_number: e.target.value,
+                  })
+                }
+                placeholder="Müqavilə nömrəsi"
+                style={modalInput}
+              />
+
+              <input
+                value={editingContract.amount || ""}
+                onChange={(e) =>
+                  setEditingContract({
+                    ...editingContract,
+                    amount: e.target.value,
+                  })
+                }
+                placeholder="Məbləğ"
+                style={modalInput}
+              />
+
+              <select
+                value={editingContract.currency || "AZN"}
+                onChange={(e) =>
+                  setEditingContract({
+                    ...editingContract,
+                    currency: e.target.value,
+                  })
+                }
+                style={modalInput}
+              >
+                <option value="AZN">AZN</option>
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+              </select>
+
+              <textarea
+                value={editingContract.subject || ""}
+                onChange={(e) =>
+                  setEditingContract({
+                    ...editingContract,
+                    subject: e.target.value,
+                  })
+                }
+                placeholder="Müqavilənin predmeti"
+                style={modalTextarea}
+              />
 
               <input
                 type="date"
@@ -538,6 +1245,10 @@ export default function ContractsPage() {
 
           .contracts-form-grid {
             grid-template-columns: 1fr !important;
+          }
+
+          .contracts-form-grid textarea {
+            grid-column: auto !important;
           }
 
           .contracts-form-bottom,
@@ -826,7 +1537,7 @@ const statusPill: CSSProperties = {
 
 const formGrid: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
   gap: 12,
 };
 
@@ -840,6 +1551,44 @@ const inputStyle: CSSProperties = {
   color: "#0f172a",
   fontSize: 14,
   outline: "none",
+};
+
+const textareaStyle: CSSProperties = {
+  ...inputStyle,
+  minHeight: 94,
+  resize: "vertical",
+  gridColumn: "span 2",
+};
+
+const templateInfoBox: CSSProperties = {
+  marginTop: 14,
+  padding: 14,
+  borderRadius: 18,
+  background:
+    "linear-gradient(135deg, rgba(239,246,255,0.96), rgba(248,250,252,0.96))",
+  border: "1px solid #bfdbfe",
+};
+
+const templateInfoTitle: CSSProperties = {
+  display: "block",
+  color: "#0f172a",
+  fontSize: 14,
+  fontWeight: 950,
+  marginBottom: 4,
+};
+
+const templateInfoText: CSSProperties = {
+  margin: 0,
+  color: "#1d4ed8",
+  fontSize: 13,
+  fontWeight: 900,
+};
+
+const templateInfoDescription: CSSProperties = {
+  margin: "5px 0 0",
+  color: "#64748b",
+  fontSize: 13,
+  lineHeight: 1.45,
 };
 
 const formBottom: CSSProperties = {
@@ -1130,6 +1879,12 @@ const modalInput: CSSProperties = {
   color: "#0f172a",
   fontSize: 14,
   outline: "none",
+};
+
+const modalTextarea: CSSProperties = {
+  ...modalInput,
+  minHeight: 90,
+  resize: "vertical",
 };
 
 const modalActions: CSSProperties = {

@@ -2,10 +2,14 @@
 
 import { useEffect, useState, type CSSProperties } from "react";
 import { supabase } from "@/lib/supabase";
+import { createAuditLog } from "@/lib/auditlog";
+import PizZip from "pizzip";
+import Docxtemplater from "docxtemplater";
 
 type Company = {
   id: string;
   name: string;
+  voen?: string | null;
 };
 
 type ContractDirection = {
@@ -23,15 +27,33 @@ type ContractGroup = {
   is_active: boolean;
 };
 
+type ContractTemplate = {
+  id: string;
+  name: string;
+  description: string | null;
+  file_url: string | null;
+  file_path: string | null;
+  template_type: string | null;
+  is_active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+const TEMPLATE_BUCKET = "contract-templates";
+
+
 export default function CreateContract() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [permissions, setPermissions] = useState<any[]>([]);
 
   const [directions, setDirections] = useState<ContractDirection[]>([]);
   const [groups, setGroups] = useState<ContractGroup[]>([]);
+  const [templates, setTemplates] = useState<ContractTemplate[]>([]);
 
   const [companyId, setCompanyId] = useState("");
   const [counterparty, setCounterparty] = useState("");
+  const [counterpartyVoen, setCounterpartyVoen] = useState("");
   const [startDate, setStartDate] = useState("");
   const [duration, setDuration] = useState("12");
   const [autoRenew, setAutoRenew] = useState(false);
@@ -39,6 +61,34 @@ export default function CreateContract() {
 
   const [contractDirection, setContractDirection] = useState("");
   const [contractGroup, setContractGroup] = useState("");
+  const [templateId, setTemplateId] = useState("");
+
+  const [contractNumber, setContractNumber] = useState("");
+  const [amount, setAmount] = useState("");
+  const [currency, setCurrency] = useState("AZN");
+  const [subject, setSubject] = useState("");
+  const [generating, setGenerating] = useState(false);
+
+  async function loadTemplates() {
+    const { data, error } = await supabase
+      .from("contract_templates")
+      .select("*")
+      .eq("is_active", true)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error(error);
+      alert("Şablonlar yüklənmədi");
+      return;
+    }
+
+    const safeTemplates = (data || []) as ContractTemplate[];
+    setTemplates(safeTemplates);
+
+    if (safeTemplates.length > 0) {
+      setTemplateId(safeTemplates[0].id);
+    }
+  }
 
   async function loadContractSettings() {
     const { data: directionData, error: directionError } = await supabase
@@ -80,11 +130,27 @@ export default function CreateContract() {
 
     if (ids.length === 0) return;
 
-    const { data } = await supabase.from("companies").select("*").in("id", ids);
+    const { data, error } = await supabase
+      .from("companies")
+      .select("*")
+      .in("id", ids);
 
-    if (data) {
-      setCompanies(data);
-      if (data.length > 0) setCompanyId(data[0].id);
+    if (error) {
+      console.error(error);
+      alert("Şirkətlər yüklənmədi");
+      return;
+    }
+
+    const safeCompanies: Company[] = (data || []).map((c: any) => ({
+      id: c.id,
+      name: c.name || c.company_name || c.title || "Adsız şirkət",
+      voen: c.voen || null,
+    }));
+
+    setCompanies(safeCompanies);
+
+    if (safeCompanies.length > 0) {
+      setCompanyId(safeCompanies[0].id);
     }
   }
 
@@ -95,6 +161,7 @@ export default function CreateContract() {
       if (!userId) return;
 
       await loadContractSettings();
+      await loadTemplates();
 
       const { data: perms } = await supabase
         .from("user_company_permissions")
@@ -127,6 +194,12 @@ export default function CreateContract() {
   );
 
   const selectedGroup = filteredGroups.find((g) => g.code === contractGroup);
+  const selectedTemplate = templates.find((template) => template.id === templateId);
+  const selectedCompany = companies.find((c) => c.id === companyId);
+  const [manualCompanyVoen, setManualCompanyVoen] = useState("");
+  const effectiveCompanyVoen = selectedCompany?.voen?.trim()
+    ? selectedCompany.voen.trim()
+    : manualCompanyVoen.trim();
 
   function calculateEndDate(start: string, months: number) {
     if (!start || isNaN(months)) return null;
@@ -152,11 +225,186 @@ export default function CreateContract() {
     return data.publicUrl;
   }
 
+  function formatDateForTemplate(value: string | null) {
+    if (!value) return "";
+
+    const date = new Date(`${value}T00:00:00`);
+
+    if (Number.isNaN(date.getTime())) return value;
+
+    return `${String(date.getDate()).padStart(2, "0")}.${String(
+      date.getMonth() + 1
+    ).padStart(2, "0")}.${date.getFullYear()}`;
+  }
+
+  async function getTemplateArrayBuffer(template: ContractTemplate) {
+    if (!template.file_path && !template.file_url) {
+      throw new Error("Şablon faylı tapılmadı");
+    }
+
+    if (template.file_path) {
+      const { data, error } = await supabase.storage
+        .from(TEMPLATE_BUCKET)
+        .download(template.file_path);
+
+      if (error || !data) {
+        throw error || new Error("Şablon faylı yüklənmədi");
+      }
+
+      return await data.arrayBuffer();
+    }
+
+    const res = await fetch(template.file_url as string);
+
+    if (!res.ok) {
+      throw new Error("Şablon faylı oxunmadı");
+    }
+
+    return await res.arrayBuffer();
+  }
+
+  async function generateContractFromTemplate({
+    template,
+    payload,
+  }: {
+    template: ContractTemplate;
+    payload: Record<string, any>;
+  }) {
+    const templateFileName = (template.file_path || template.file_url || "")
+      .toString()
+      .toLowerCase();
+
+    if (!templateFileName.endsWith(".docx")) {
+      return null;
+    }
+
+    const arrayBuffer = await getTemplateArrayBuffer(template);
+    const zip = new PizZip(arrayBuffer);
+
+    const doc = new Docxtemplater(zip, {
+      paragraphLoop: true,
+      linebreaks: true,
+      delimiters: {
+        start: "{{",
+        end: "}}",
+      },
+    });
+
+    doc.render(payload);
+
+    const generatedBlob = doc.getZip().generate({
+      type: "blob",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+
+    const safeCounterparty = (payload.counterparty || "muqavile")
+      .toString()
+      .trim()
+      .replace(/[^a-zA-Z0-9ƏÖÜĞŞÇİəöüğşçı]+/g, "-")
+      .replace(/-+/g, "-");
+
+    const generatedPath = `generated/${Date.now()}-${safeCounterparty}.docx`;
+
+    const { error } = await supabase.storage
+      .from("contracts")
+      .upload(generatedPath, generatedBlob, {
+        contentType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        upsert: false,
+      });
+
+    if (error) throw error;
+
+    return generatedPath;
+  }
+
+  async function generateContractFromManualDocx({
+    selectedFile,
+    payload,
+  }: {
+    selectedFile: File;
+    payload: Record<string, any>;
+  }) {
+    const fileName = selectedFile.name.toLowerCase();
+
+    if (!fileName.endsWith(".docx")) {
+      return null;
+    }
+
+    const arrayBuffer = await selectedFile.arrayBuffer();
+    const zip = new PizZip(arrayBuffer);
+
+    const doc = new Docxtemplater(zip, {
+      paragraphLoop: true,
+      linebreaks: true,
+      delimiters: {
+        start: "{{",
+        end: "}}",
+      },
+    });
+
+    doc.render(payload);
+
+    const generatedBlob = doc.getZip().generate({
+      type: "blob",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+
+    const safeCounterparty = (payload.counterparty || "muqavile")
+      .toString()
+      .trim()
+      .replace(/[^a-zA-Z0-9ƏÖÜĞŞÇİəöüğşçı]+/g, "-")
+      .replace(/-+/g, "-");
+
+    const generatedPath = `generated/${Date.now()}-${safeCounterparty}.docx`;
+
+    const { error } = await supabase.storage
+      .from("contracts")
+      .upload(generatedPath, generatedBlob, {
+        contentType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        upsert: false,
+      });
+
+    if (error) throw error;
+
+    return generatedPath;
+  }
+
+  async function openTemplateFile() {
+    if (!selectedTemplate?.file_path && !selectedTemplate?.file_url) {
+      alert("Seçilən şablonda fayl yoxdur");
+      return;
+    }
+
+    if (selectedTemplate.file_path) {
+      const { data, error } = await supabase.storage
+        .from(TEMPLATE_BUCKET)
+        .createSignedUrl(selectedTemplate.file_path, 60 * 10);
+
+      if (error || !data?.signedUrl) {
+        console.error(error);
+        alert("Şablon faylı açıla bilmədi");
+        return;
+      }
+
+      window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    if (selectedTemplate.file_url) {
+      window.open(selectedTemplate.file_url, "_blank", "noopener,noreferrer");
+    }
+  }
+
   async function createContract() {
     const monthCount = parseInt(duration);
 
     if (
-      !counterparty ||
+      !counterparty.trim() ||
+      !counterpartyVoen.trim() ||
       !companyId ||
       !startDate ||
       !contractDirection ||
@@ -175,18 +423,95 @@ export default function CreateContract() {
       return;
     }
 
+    const company = companies.find((c) => c.id === companyId);
+
+    if (!company) {
+      alert("Şirkət tapılmadı");
+      return;
+    }
+
+    if (!effectiveCompanyVoen) {
+      alert("Seçilən şirkətin VÖEN-i yoxdur. Zəhmət olmasa VÖEN-i əl ilə daxil edin.");
+      return;
+    }
+
     const { data: userData } = await supabase.auth.getUser();
     const userId = userData.user?.id;
     if (!userId) return;
 
-    const company = companies.find((c) => c.id === companyId);
     const endDate = calculateEndDate(startDate, monthCount);
-    const fileUrl = await uploadFile();
 
-    const { error } = await supabase.from("contracts").insert({
-      counterparty,
+    setGenerating(true);
+
+    let fileUrl: string | null = null;
+
+    try {
+      const templatePayload = {
+        template_name: selectedTemplate?.name || file?.name || "",
+        template_type: selectedTemplate?.template_type || "Müqavilə",
+        template_kind: selectedTemplate?.template_type || "",
+        created_date: formatDateForTemplate(new Date().toISOString().split("T")[0]),
+        created_by: userData.user?.email || "",
+        company_name: company.name,
+        company_voen: effectiveCompanyVoen,
+        counterparty: counterparty.trim(),
+        counterparty_voen: counterpartyVoen.trim(),
+        contract_number: contractNumber.trim(),
+        contract_date: formatDateForTemplate(startDate),
+        start_date: formatDateForTemplate(startDate),
+        end_date: formatDateForTemplate(endDate),
+        amount: amount.trim(),
+        currency,
+        status: "Aktiv",
+        subject: subject.trim(),
+        auto_renew: autoRenew ? "Bəli" : "Xeyr",
+        duration_month: monthCount,
+      };
+
+      const templateFileName = (
+        selectedTemplate?.file_path ||
+        selectedTemplate?.file_url ||
+        ""
+      )
+        .toString()
+        .toLowerCase();
+
+      if (selectedTemplate && templateFileName.endsWith(".docx")) {
+        fileUrl = await generateContractFromTemplate({
+          template: selectedTemplate,
+          payload: templatePayload,
+        });
+      } else if (file && file.name.toLowerCase().endsWith(".docx")) {
+        fileUrl = await generateContractFromManualDocx({
+          selectedFile: file,
+          payload: templatePayload,
+        });
+      } else if (selectedTemplate) {
+        alert(
+          "Seçilən şablon PDF-dir. Avtomatik doldurma üçün ya Şablonlar səhifəsində həmin şablonu DOCX kimi yenidən yüklə, ya da bu formada DOCX fayl seç."
+        );
+        setGenerating(false);
+        return;
+      } else {
+        fileUrl = await uploadFile();
+      }
+    } catch (err: any) {
+      alert(
+        err?.message ||
+          "Şablondan müqavilə faylı yaradılmadı. DOCX şablonunda {{...}} dəyişənlərini yoxlayın."
+      );
+      setGenerating(false);
+      return;
+    }
+
+    setGenerating(false);
+
+    const newContractPayload = {
+      counterparty: counterparty.trim(),
+      counterparty_voen: counterpartyVoen.trim(),
       company_id: companyId,
-      company_name: company?.name,
+      company_name: company.name,
+      company_voen: effectiveCompanyVoen,
       start_date: startDate,
       end_date: endDate,
       duration_month: monthCount,
@@ -196,20 +521,54 @@ export default function CreateContract() {
       created_by: userId,
       contract_direction: contractDirection,
       contract_group: contractGroup,
-    });
+      template_id: selectedTemplate?.id || null,
+      template_name: selectedTemplate?.name || null,
+      template_file_path: selectedTemplate?.file_path || null,
+      generated_file_path:
+        selectedTemplate || file?.name.toLowerCase().endsWith(".docx")
+          ? fileUrl
+          : null,
+      contract_number: contractNumber.trim() || null,
+      amount: amount.trim() || null,
+      currency,
+      subject: subject.trim() || null,
+    };
+
+    const { data: insertedContract, error } = await supabase
+      .from("contracts")
+      .insert(newContractPayload)
+      .select("*")
+      .single();
 
     if (error) {
-      alert("Xəta baş verdi");
+      console.error(error);
+      alert("Xəta baş verdi: " + error.message);
       return;
     }
+
+    await createAuditLog({
+      action: "CREATE_CONTRACT",
+      tableName: "contracts",
+      recordId: insertedContract?.id || null,
+      description: `İstifadəçi yeni müqavilə yaratdı: ${newContractPayload.counterparty}`,
+      oldData: null,
+      newData: insertedContract || newContractPayload,
+    });
 
     alert("Müqavilə yaradıldı");
 
     setCounterparty("");
+    setCounterpartyVoen("");
+    setManualCompanyVoen("");
     setStartDate("");
     setDuration("12");
     setAutoRenew(false);
     setFile(null);
+    setTemplateId(templates[0]?.id || "");
+    setContractNumber("");
+    setAmount("");
+    setCurrency("AZN");
+    setSubject("");
 
     if (directions.length > 0) {
       const firstDirection = directions[0];
@@ -232,7 +591,6 @@ export default function CreateContract() {
     setContractGroup(directionGroups[0]?.code || "");
   }
 
-  const selectedCompany = companies.find((c) => c.id === companyId);
   const monthCount = parseInt(duration);
   const previewEndDate = calculateEndDate(startDate, monthCount);
 
@@ -315,19 +673,58 @@ export default function CreateContract() {
             </div>
 
             <div style={fieldGroup}>
+              <label style={labelStyle}>Qarşı tərəfin VÖEN-i</label>
+              <input
+                className="create-input"
+                placeholder="Məsələn: 1234567891"
+                value={counterpartyVoen}
+                onChange={(e) => setCounterpartyVoen(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+
+            <div style={fieldGroup}>
               <label style={labelStyle}>Şirkət</label>
               <select
                 className="create-input"
                 value={companyId}
-                onChange={(e) => setCompanyId(e.target.value)}
+                onChange={(e) => {
+                  setCompanyId(e.target.value);
+                  setManualCompanyVoen("");
+                }}
                 style={inputStyle}
               >
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
+                {companies.length === 0 ? (
+                  <option value="">Şirkət yoxdur</option>
+                ) : (
+                  companies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))
+                )}
               </select>
+            </div>
+
+            <div style={fieldGroup}>
+              <label style={labelStyle}>Şirkətin VÖEN-i</label>
+              <input
+                className="create-input"
+                value={selectedCompany?.voen?.trim() ? selectedCompany.voen : manualCompanyVoen}
+                onChange={(e) => setManualCompanyVoen(e.target.value)}
+                readOnly={!!selectedCompany?.voen?.trim()}
+                placeholder={
+                  selectedCompany?.voen?.trim()
+                    ? "Seçilən şirkətin VÖEN-i"
+                    : "VÖEN yoxdur, əl ilə daxil edin"
+                }
+                style={{
+                  ...inputStyle,
+                  background: selectedCompany?.voen?.trim() ? "#f8fafc" : "#fff",
+                  color: "#0f172a",
+                  cursor: selectedCompany?.voen?.trim() ? "not-allowed" : "text",
+                }}
+              />
             </div>
 
             <div style={fieldGroup}>
@@ -368,6 +765,24 @@ export default function CreateContract() {
             </div>
 
             <div style={fieldGroup}>
+              <label style={labelStyle}>Müqavilə şablonu</label>
+              <select
+                className="create-input"
+                value={templateId}
+                onChange={(e) => setTemplateId(e.target.value)}
+                style={inputStyle}
+              >
+                <option value="">Şablonsuz</option>
+                {templates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.name}
+                    {template.template_type ? ` / ${template.template_type}` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={fieldGroup}>
               <label style={labelStyle}>Başlama tarixi</label>
               <input
                 className="create-input"
@@ -388,7 +803,82 @@ export default function CreateContract() {
                 style={inputStyle}
               />
             </div>
+
+            <div style={fieldGroup}>
+              <label style={labelStyle}>Müqavilə nömrəsi</label>
+              <input
+                className="create-input"
+                placeholder="Məsələn: M-001"
+                value={contractNumber}
+                onChange={(e) => setContractNumber(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+
+            <div style={fieldGroup}>
+              <label style={labelStyle}>Məbləğ</label>
+              <input
+                className="create-input"
+                placeholder="Məsələn: 1500"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                style={inputStyle}
+              />
+            </div>
+
+            <div style={fieldGroup}>
+              <label style={labelStyle}>Valyuta</label>
+              <select
+                className="create-input"
+                value={currency}
+                onChange={(e) => setCurrency(e.target.value)}
+                style={inputStyle}
+              >
+                <option value="AZN">AZN</option>
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+              </select>
+            </div>
+
+            <div style={{ ...fieldGroup, gridColumn: "1 / -1" }}>
+              <label style={labelStyle}>Müqavilənin predmeti</label>
+              <textarea
+                className="create-input"
+                placeholder="Müqavilənin predmeti..."
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                style={textareaStyle}
+              />
+            </div>
           </div>
+
+          {selectedTemplate && (
+            <div style={templateInfoBox}>
+              <div>
+                <strong style={templateInfoTitle}>Seçilən şablon</strong>
+                <p style={templateInfoText}>
+                  {selectedTemplate.name}
+                  {selectedTemplate.template_type
+                    ? ` / ${selectedTemplate.template_type}`
+                    : ""}
+                </p>
+                <p style={templateInfoDescription}>
+                  {selectedTemplate.description ||
+                    "DOCX şablonunda {{company_name}}, {{company_voen}}, {{counterparty}}, {{counterparty_voen}}, {{start_date}}, {{end_date}}, {{contract_number}}, {{amount}}, {{currency}}, {{subject}} yerləri avtomatik doldurulacaq."}
+                </p>
+              </div>
+
+              {(selectedTemplate.file_path || selectedTemplate.file_url) && (
+                <button
+                  type="button"
+                  onClick={openTemplateFile}
+                  style={templatePreviewBtn}
+                >
+                  Şablona bax
+                </button>
+              )}
+            </div>
+          )}
 
           <label
             className="create-renew-box"
@@ -424,6 +914,7 @@ export default function CreateContract() {
             <input
               type="file"
               id="fileUpload"
+              accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               onChange={(e) => setFile(e.target.files?.[0] || null)}
               style={{ display: "none" }}
             />
@@ -445,7 +936,9 @@ export default function CreateContract() {
                 <span style={fileUploadText}>
                   {file
                     ? "Fayl seçildi. Müqavilə yaradılarkən yüklənəcək."
-                    : "PDF və ya uyğun müqavilə faylını əlavə edə bilərsiniz."}
+                    : selectedTemplate
+                    ? "Əgər seçilən şablon PDF-disə, burada DOCX şablon faylı seçə bilərsiniz."
+                    : "PDF, DOC və ya DOCX müqavilə faylını əlavə edə bilərsiniz."}
                 </span>
               </span>
 
@@ -459,10 +952,15 @@ export default function CreateContract() {
             className="create-submit-button"
             onClick={createContract}
             type="button"
-            style={buttonStyle}
+            disabled={generating}
+            style={{
+              ...buttonStyle,
+              opacity: generating ? 0.75 : 1,
+              cursor: generating ? "not-allowed" : "pointer",
+            }}
           >
             <span style={buttonIcon}>＋</span>
-            Müqavilə yarat
+            {generating ? "Şablon doldurulur..." : "Müqavilə yarat"}
           </button>
         </div>
 
@@ -486,10 +984,20 @@ export default function CreateContract() {
             </div>
 
             <div style={previewItem}>
+              <span style={previewLabel}>Qarşı tərəfin VÖEN-i</span>
+              <strong style={previewValue}>{counterpartyVoen || "-"}</strong>
+            </div>
+
+            <div style={previewItem}>
               <span style={previewLabel}>Şirkət</span>
               <strong style={previewValue}>
                 {selectedCompany?.name || "-"}
               </strong>
+            </div>
+
+            <div style={previewItem}>
+              <span style={previewLabel}>Şirkətin VÖEN-i</span>
+              <strong style={previewValue}>{effectiveCompanyVoen || "-"}</strong>
             </div>
 
             <div style={previewItem}>
@@ -500,6 +1008,13 @@ export default function CreateContract() {
             <div style={previewItem}>
               <span style={previewLabel}>Qrup</span>
               <strong style={previewValue}>{selectedGroup?.name || "-"}</strong>
+            </div>
+
+            <div style={previewItem}>
+              <span style={previewLabel}>Şablon</span>
+              <strong style={previewValue}>
+                {selectedTemplate?.name || "Şablonsuz"}
+              </strong>
             </div>
 
             <div style={previewItem}>
@@ -522,6 +1037,18 @@ export default function CreateContract() {
             </div>
 
             <div style={previewItem}>
+              <span style={previewLabel}>Müqavilə nömrəsi</span>
+              <strong style={previewValue}>{contractNumber || "-"}</strong>
+            </div>
+
+            <div style={previewItem}>
+              <span style={previewLabel}>Məbləğ</span>
+              <strong style={previewValue}>
+                {amount ? `${amount} ${currency}` : "-"}
+              </strong>
+            </div>
+
+            <div style={previewItem}>
               <span style={previewLabel}>Avtomatik yenilənmə</span>
               <strong style={previewValue}>
                 {autoRenew ? "Bəli" : "Xeyr"}
@@ -539,8 +1066,8 @@ export default function CreateContract() {
           <div className="create-note-box" style={noteBox}>
             <span style={noteIcon}>ℹ️</span>
             <p style={noteText}>
-              Müqavilə yaradıldıqdan sonra status avtomatik olaraq aktiv
-              saxlanılır.
+              Müqavilə yaradıldıqdan sonra DOCX şablon avtomatik doldurulur,
+              hazır fayl müqaviləyə əlavə edilir və status aktiv saxlanılır.
             </p>
           </div>
         </aside>
@@ -973,6 +1500,60 @@ const inputStyle: CSSProperties = {
   fontSize: 14,
   outline: "none",
   boxShadow: "inset 0 1px 0 rgba(15,23,42,0.03)",
+};
+
+const textareaStyle: CSSProperties = {
+  ...inputStyle,
+  minHeight: 96,
+  resize: "vertical",
+};
+
+const templateInfoBox: CSSProperties = {
+  marginTop: 18,
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+  padding: 15,
+  borderRadius: 20,
+  background:
+    "linear-gradient(135deg, rgba(239,246,255,0.96), rgba(248,250,252,0.96))",
+  border: "1px solid #bfdbfe",
+  flexWrap: "wrap",
+};
+
+const templateInfoTitle: CSSProperties = {
+  display: "block",
+  color: "#0f172a",
+  fontSize: 14,
+  fontWeight: 950,
+  marginBottom: 4,
+};
+
+const templateInfoText: CSSProperties = {
+  margin: 0,
+  color: "#1d4ed8",
+  fontSize: 13,
+  fontWeight: 900,
+};
+
+const templateInfoDescription: CSSProperties = {
+  margin: "5px 0 0",
+  color: "#64748b",
+  fontSize: 13,
+  lineHeight: 1.45,
+};
+
+const templatePreviewBtn: CSSProperties = {
+  border: "1px solid #bfdbfe",
+  background: "#fff",
+  color: "#1d4ed8",
+  padding: "9px 12px",
+  borderRadius: 13,
+  cursor: "pointer",
+  fontSize: 13,
+  fontWeight: 900,
+  whiteSpace: "nowrap",
 };
 
 /* RENEW */

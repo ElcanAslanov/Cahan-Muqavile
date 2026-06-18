@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { supabase } from "@/lib/supabase";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
@@ -9,17 +9,29 @@ import autoTable from "jspdf-autotable";
 type Contract = {
   id: string;
   company_name: string;
+  company_id?: string | null;
+  company_voen?: string | null;
   counterparty: string;
+  counterparty_voen?: string | null;
   start_date: string;
   end_date: string;
   file_url: string | null;
+  generated_file_path?: string | null;
+  template_name?: string | null;
   auto_renew: boolean;
+  created_by?: string | null;
+  created_by_name?: string | null;
 };
+
+type StatFilter = "ALL" | "COMPANIES" | "EXPIRING_30" | "CRITICAL" | "AUTO_RENEW" | "PDF";
 
 export default function DashboardPage() {
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [selectedCompanies, setSelectedCompanies] = useState<string[]>([]);
   const [search, setSearch] = useState("");
+  const [activeStatFilter, setActiveStatFilter] = useState<StatFilter>("ALL");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const [sortConfig, setSortConfig] = useState<{
     key: keyof Contract | null;
@@ -28,6 +40,64 @@ export default function DashboardPage() {
     key: null,
     direction: "asc",
   });
+
+  function getProfileName(profile: any) {
+    if (!profile) return "-";
+
+    const firstLast = `${profile.first_name || ""} ${
+      profile.last_name || ""
+    }`.trim();
+
+    return (
+      profile.full_name ||
+      firstLast ||
+      profile.name ||
+      profile.display_name ||
+      profile.email ||
+      "-"
+    );
+  }
+
+  async function enrichContractsWithCreators(rows: any[]) {
+    const creatorIds = Array.from(
+      new Set(
+        rows
+          .map((c) => c.created_by)
+          .filter((id): id is string => Boolean(id))
+      )
+    );
+
+    if (creatorIds.length === 0) {
+      return rows.map((c) => ({
+        ...c,
+        created_by_name: "-",
+      }));
+    }
+
+    const { data: profiles, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .in("id", creatorIds);
+
+    if (error) {
+      console.error("Creator profiles load error:", error);
+      return rows.map((c) => ({
+        ...c,
+        created_by_name: c.created_by || "-",
+      }));
+    }
+
+    const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
+
+    return rows.map((c) => {
+      const profile = c.created_by ? profileMap.get(c.created_by) : null;
+
+      return {
+        ...c,
+        created_by_name: getProfileName(profile),
+      };
+    });
+  }
 
   async function loadContracts() {
     const { data, error } = await supabase
@@ -42,41 +112,86 @@ export default function DashboardPage() {
     }
 
     if (data) {
-      setContracts(data);
+      const enriched = await enrichContractsWithCreators(data);
+      setContracts(enriched as Contract[]);
     }
   }
 
   useEffect(() => {
     loadContracts();
   }, []);
+  function isHttpUrl(value: string) {
+    return /^https?:\/\//i.test(value);
+  }
 
-  const companies = [...new Set(contracts.map((c) => c.company_name))];
+  function getFileLabel(filePath: string | null | undefined) {
+    if (!filePath) return "Fayl yoxdur";
 
-  const filteredContracts = useMemo(() => {
-    let result = contracts
-      .filter((c) => {
-        if (selectedCompanies.length === 0) return true;
-        return selectedCompanies.includes(c.company_name);
-      })
-      .filter(
-        (c) =>
-          c.counterparty.toLowerCase().includes(search.toLowerCase()) ||
-          c.company_name.toLowerCase().includes(search.toLowerCase())
-      );
+    const clean = filePath.split("?")[0].toLowerCase();
 
-    if (sortConfig.key) {
-      result.sort((a, b) => {
-        const aVal = a[sortConfig.key!] || "";
-        const bVal = b[sortConfig.key!] || "";
+    if (clean.endsWith(".pdf")) return "PDFə bax";
+    if (clean.endsWith(".docx")) return "DOCXə bax";
+    if (clean.endsWith(".doc")) return "DOCa bax";
 
-        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
-        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
-        return 0;
-      });
+    return "Fayla bax";
+  }
+
+  function normalizeContractStoragePath(value: string) {
+    if (!value) return "";
+
+    if (!isHttpUrl(value)) {
+      return value.replace(/^\/+/, "");
     }
 
-    return result;
-  }, [contracts, selectedCompanies, search, sortConfig]);
+    try {
+      const url = new URL(value);
+      const marker = "/storage/v1/object/public/contracts/";
+      const signedMarker = "/storage/v1/object/sign/contracts/";
+
+      if (url.pathname.includes(marker)) {
+        return decodeURIComponent(url.pathname.split(marker)[1] || "");
+      }
+
+      if (url.pathname.includes(signedMarker)) {
+        return decodeURIComponent(url.pathname.split(signedMarker)[1] || "");
+      }
+    } catch {
+      return value;
+    }
+
+    return value;
+  }
+
+  async function openContractFile(contract: Contract) {
+    const rawPath = contract.generated_file_path || contract.file_url;
+
+    if (!rawPath) {
+      alert("Bu müqaviləyə fayl əlavə edilməyib");
+      return;
+    }
+
+    if (isHttpUrl(rawPath)) {
+      window.open(rawPath, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    const storagePath = normalizeContractStoragePath(rawPath);
+
+    const { data, error } = await supabase.storage
+      .from("contracts")
+      .createSignedUrl(storagePath, 60 * 10);
+
+    if (error || !data?.signedUrl) {
+      console.error(error);
+      alert("Fayl açıla bilmədi");
+      return;
+    }
+
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+  }
+
+
+  const companies = [...new Set(contracts.map((c) => c.company_name))];
 
   function requestSort(key: keyof Contract) {
     let direction: "asc" | "desc" = "asc";
@@ -89,10 +204,41 @@ export default function DashboardPage() {
   }
 
   function daysLeft(end: string) {
-    const endDate = new Date(end).getTime();
+    const endDate = new Date(`${end}T00:00:00`).getTime();
     const today = new Date().getTime();
     const diff = endDate - today;
     return Math.floor(diff / (1000 * 60 * 60 * 24));
+  }
+
+  function applyDateRangeFilter(contract: Contract) {
+    if (!dateFrom && !dateTo) return true;
+
+    const contractDate = new Date(`${contract.start_date}T00:00:00`).getTime();
+
+    if (Number.isNaN(contractDate)) return false;
+
+    const fromTime = dateFrom
+      ? new Date(`${dateFrom}T00:00:00`).getTime()
+      : null;
+
+    const toTime = dateTo
+      ? new Date(`${dateTo}T23:59:59`).getTime()
+      : null;
+
+    if (fromTime !== null && contractDate < fromTime) return false;
+    if (toTime !== null && contractDate > toTime) return false;
+
+    return true;
+  }
+
+  function applyStatFilter(contract: Contract) {
+    if (activeStatFilter === "ALL") return true;
+    if (activeStatFilter === "COMPANIES") return true;
+    if (activeStatFilter === "EXPIRING_30") return daysLeft(contract.end_date) <= 30;
+    if (activeStatFilter === "CRITICAL") return daysLeft(contract.end_date) <= 7;
+    if (activeStatFilter === "AUTO_RENEW") return contract.auto_renew;
+    if (activeStatFilter === "PDF") return Boolean(contract.file_url);
+    return true;
   }
 
   function expiryBadge(days: number) {
@@ -108,6 +254,8 @@ export default function DashboardPage() {
   }
 
   function toggleCompany(company: string) {
+    setActiveStatFilter("ALL");
+
     setSelectedCompanies((prev) => {
       if (prev.includes(company)) {
         return prev.filter((c) => c !== company);
@@ -117,13 +265,73 @@ export default function DashboardPage() {
     });
   }
 
+  function handleStatCardClick(filter: StatFilter) {
+    setActiveStatFilter((prev) => (prev === filter ? "ALL" : filter));
+    setSelectedCompanies([]);
+  }
+
+  function clearAllFilters() {
+    setSelectedCompanies([]);
+    setSearch("");
+    setDateFrom("");
+    setDateTo("");
+    setActiveStatFilter("ALL");
+  }
+
+  const filteredContracts = useMemo(() => {
+    let result = contracts
+      .filter((c) => applyStatFilter(c))
+      .filter((c) => applyDateRangeFilter(c))
+      .filter((c) => {
+        if (selectedCompanies.length === 0) return true;
+        return selectedCompanies.includes(c.company_name);
+      })
+      .filter((c) => {
+        const q = search.toLowerCase().trim();
+        if (!q) return true;
+
+        return (
+          c.counterparty.toLowerCase().includes(q) ||
+          c.company_name.toLowerCase().includes(q) ||
+          (c.company_voen || "").toLowerCase().includes(q) ||
+          (c.counterparty_voen || "").toLowerCase().includes(q) ||
+          (c.created_by_name || "").toLowerCase().includes(q)
+        );
+      });
+
+    if (sortConfig.key) {
+      result = [...result].sort((a, b) => {
+        const aVal = a[sortConfig.key!] || "";
+        const bVal = b[sortConfig.key!] || "";
+
+        if (aVal < bVal) return sortConfig.direction === "asc" ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return result;
+  }, [
+    contracts,
+    selectedCompanies,
+    search,
+    sortConfig,
+    activeStatFilter,
+    dateFrom,
+    dateTo,
+  ]);
+
   function exportExcel() {
     const data = filteredContracts.map((c) => ({
       Şirkət: c.company_name,
+      "Şirkət VÖEN": c.company_voen || "-",
       Müqavilə: c.counterparty,
+      "Qarşı tərəf VÖEN": c.counterparty_voen || "-",
+      Yaradan: c.created_by_name || "-",
       Başlanma: c.start_date,
       Bitmə: c.end_date,
       Yeniləmə: c.auto_renew ? "Bəli" : "Xeyr",
+      Sənəd: c.file_url ? "Fayl var" : "Fayl yoxdur",
     }));
 
     const ws = XLSX.utils.json_to_sheet(data);
@@ -136,14 +344,26 @@ export default function DashboardPage() {
   function exportPDF() {
     const doc = new jsPDF();
 
-    const columns = ["Şirkət", "Müqavilə", "Başlanma", "Bitmə", "Yeniləmə"];
+    const columns = [
+      "Sirket",
+      "Sirket VOEN",
+      "Muqavile",
+      "Qarsi VOEN",
+      "Yaradan",
+      "Baslanma",
+      "Bitme",
+      "Yenileme",
+    ];
 
     const rows = filteredContracts.map((c) => [
       c.company_name,
+      c.company_voen || "-",
       c.counterparty,
+      c.counterparty_voen || "-",
+      c.created_by_name || "-",
       c.start_date,
       c.end_date,
-      c.auto_renew ? "Bəli" : "Xeyr",
+      c.auto_renew ? "Beli" : "Xeyr",
     ]);
 
     autoTable(doc, {
@@ -159,6 +379,20 @@ export default function DashboardPage() {
     return sortConfig.direction === "asc" ? "↑" : "↓";
   }
 
+  function getActiveTitle() {
+    if (selectedCompanies.length > 0) {
+      return `Seçilmiş şirkətlər (${selectedCompanies.length})`;
+    }
+
+    if (activeStatFilter === "EXPIRING_30") return "30 günə bitən müqavilələr";
+    if (activeStatFilter === "CRITICAL") return "Kritik müqavilələr";
+    if (activeStatFilter === "AUTO_RENEW") return "Avto yenilənən müqavilələr";
+    if (activeStatFilter === "PDF") return "Faylı olan müqavilələr";
+    if (activeStatFilter === "COMPANIES") return "Şirkətlər üzrə müqavilələr";
+
+    return "Bütün müqavilələr";
+  }
+
   const expiringSoonCount = contracts.filter(
     (c) => daysLeft(c.end_date) <= 30
   ).length;
@@ -168,6 +402,13 @@ export default function DashboardPage() {
 
   const autoRenewCount = contracts.filter((c) => c.auto_renew).length;
   const pdfCount = contracts.filter((c) => c.file_url).length;
+
+  const hasAnyFilter =
+    search ||
+    dateFrom ||
+    dateTo ||
+    selectedCompanies.length > 0 ||
+    activeStatFilter !== "ALL";
 
   return (
     <div
@@ -224,42 +465,66 @@ export default function DashboardPage() {
       </section>
 
       {/* STATS */}
-      <section className="dashboard-stats" style={statsGrid}>
-        <div style={statCard}>
-          <div style={statTop}>
-            <span style={statIconBlue}>📁</span>
-            <span style={statLabel}>Aktiv müqavilə</span>
-          </div>
-          <strong style={statValue}>{contracts.length}</strong>
-          <span style={statHint}>Sistemdə aktiv olan müqavilələr</span>
-        </div>
+      <section className="dashboard-stats" style={statsGrid} onClick={(e) => e.stopPropagation()}>
+        <StatCard
+          icon="📁"
+          label="Aktiv müqavilə"
+          value={contracts.length}
+          hint="Sistemdə aktiv olan müqavilələr"
+          active={activeStatFilter === "ALL"}
+          onClick={() => handleStatCardClick("ALL")}
+          iconStyle={statIconBlue}
+        />
 
-        <div style={statCard}>
-          <div style={statTop}>
-            <span style={statIconGreen}>🏢</span>
-            <span style={statLabel}>Şirkətlər</span>
-          </div>
-          <strong style={statValue}>{companies.length}</strong>
-          <span style={statHint}>Müqaviləsi olan şirkətlər</span>
-        </div>
+        <StatCard
+          icon="🏢"
+          label="Şirkətlər"
+          value={companies.length}
+          hint="Müqaviləsi olan şirkətlər"
+          active={activeStatFilter === "COMPANIES"}
+          onClick={() => handleStatCardClick("COMPANIES")}
+          iconStyle={statIconGreen}
+        />
 
-        <div style={statCard}>
-          <div style={statTop}>
-            <span style={statIconOrange}>⏳</span>
-            <span style={statLabel}>30 günə bitən</span>
-          </div>
-          <strong style={statValue}>{expiringSoonCount}</strong>
-          <span style={statHint}>Bitmə tarixi yaxın olanlar</span>
-        </div>
+        <StatCard
+          icon="⏳"
+          label="30 günə bitən"
+          value={expiringSoonCount}
+          hint="Bitmə tarixi yaxın olanlar"
+          active={activeStatFilter === "EXPIRING_30"}
+          onClick={() => handleStatCardClick("EXPIRING_30")}
+          iconStyle={statIconOrange}
+        />
 
-        <div style={statCard}>
-          <div style={statTop}>
-            <span style={statIconRed}>⚠️</span>
-            <span style={statLabel}>Kritik</span>
-          </div>
-          <strong style={statValue}>{criticalCount}</strong>
-          <span style={statHint}>7 gün və ya daha az qalanlar</span>
-        </div>
+        <StatCard
+          icon="⚠️"
+          label="Kritik"
+          value={criticalCount}
+          hint="7 gün və ya daha az qalanlar"
+          active={activeStatFilter === "CRITICAL"}
+          onClick={() => handleStatCardClick("CRITICAL")}
+          iconStyle={statIconRed}
+        />
+
+        <StatCard
+          icon="🔁"
+          label="Avto yenilənən"
+          value={autoRenewCount}
+          hint="Avtomatik yenilənən müqavilələr"
+          active={activeStatFilter === "AUTO_RENEW"}
+          onClick={() => handleStatCardClick("AUTO_RENEW")}
+          iconStyle={statIconPurple}
+        />
+
+        <StatCard
+          icon="📄"
+          label="Faylı olan"
+          value={pdfCount}
+          hint="Fayl əlavə edilmiş müqavilələr"
+          active={activeStatFilter === "PDF"}
+          onClick={() => handleStatCardClick("PDF")}
+          iconStyle={statIconGray}
+        />
       </section>
 
       {/* TOOLBAR */}
@@ -267,20 +532,60 @@ export default function DashboardPage() {
         <div style={toolbarInfo}>
           <h2 style={toolbarTitle}>Filter və axtarış</h2>
           <p style={toolbarText}>
-            Şirkət kartlarını seçərək çoxlu filter tətbiq edə bilərsiniz.
+            Şirkət kartlarını seçərək, tarix aralığı verərək və ya axtarışla
+            müqavilələri filter edə bilərsiniz.
           </p>
         </div>
 
-        <div className="dashboard-search-wrap" style={searchWrap}>
-          <span style={searchIcon}>⌕</span>
+        <div style={toolbarRight}>
+          <div style={searchAndDateWrap}>
+            <div className="dashboard-search-wrap" style={searchWrap}>
+              <span style={searchIcon}>⌕</span>
 
-          <input
-            placeholder="Müqavilələri axtar..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-            style={searchInputStyle}
-          />
+              <input
+                placeholder="Müqavilə, şirkət, VÖEN və ya yaradan üzrə axtar..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                style={searchInputStyle}
+              />
+            </div>
+
+            <div style={dateFilterWrap} onClick={(e) => e.stopPropagation()}>
+              <label style={dateLabel}>
+                Başlama
+                <input
+                  type="date"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  style={dateInputStyle}
+                />
+              </label>
+
+              <label style={dateLabel}>
+                Bitmə
+                <input
+                  type="date"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  style={dateInputStyle}
+                />
+              </label>
+            </div>
+          </div>
+
+          {hasAnyFilter && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                clearAllFilters();
+              }}
+              style={clearSearchBtn}
+            >
+              Təmizlə
+            </button>
+          )}
         </div>
       </section>
 
@@ -327,24 +632,20 @@ export default function DashboardPage() {
       <section className="dashboard-table-card" style={contentContainerStyle}>
         <div style={tableHeader}>
           <div>
-            <h2 style={tableTitle}>
-              {selectedCompanies.length > 0
-                ? `Seçilmiş şirkətlər (${selectedCompanies.length})`
-                : "Bütün müqavilələr"}
-            </h2>
+            <h2 style={tableTitle}>{getActiveTitle()}</h2>
 
             <p style={tableSubtitle}>
               Göstərilən nəticə: {filteredContracts.length} / {contracts.length} ·
-              PDF-i olan: {pdfCount} · Avto yenilənən: {autoRenewCount}
+              Faylı olan: {pdfCount} · Avto yenilənən: {autoRenewCount}
             </p>
           </div>
 
-          {selectedCompanies.length > 0 && (
+          {hasAnyFilter && (
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                setSelectedCompanies([]);
+                clearAllFilters();
               }}
               style={clearFilterBtn}
             >
@@ -358,7 +659,7 @@ export default function DashboardPage() {
             <div style={emptyIcon}>📭</div>
             <h3 style={emptyTitle}>Müqavilə tapılmadı</h3>
             <p style={emptyText}>
-              Axtarış sözünü dəyişin və ya şirkət filterlərini təmizləyin.
+              Axtarış sözünü dəyişin və ya filterləri təmizləyin.
             </p>
           </div>
         ) : (
@@ -369,8 +670,17 @@ export default function DashboardPage() {
                   <th style={thStyle} onClick={() => requestSort("company_name")}>
                     Şirkət {sortIcon("company_name")}
                   </th>
+                  <th style={thStyle} onClick={() => requestSort("company_voen")}>
+                    Şirkət VÖEN {sortIcon("company_voen")}
+                  </th>
                   <th style={thStyle} onClick={() => requestSort("counterparty")}>
                     Müqavilə {sortIcon("counterparty")}
+                  </th>
+                  <th style={thStyle} onClick={() => requestSort("counterparty_voen")}>
+                    Qarşı tərəf VÖEN {sortIcon("counterparty_voen")}
+                  </th>
+                  <th style={thStyle} onClick={() => requestSort("created_by_name")}>
+                    Yaradan {sortIcon("created_by_name")}
                   </th>
                   <th style={thStyle} onClick={() => requestSort("start_date")}>
                     Başlanma {sortIcon("start_date")}
@@ -395,7 +705,10 @@ export default function DashboardPage() {
                       <td style={tdStyle}>
                         <strong style={strongText}>{c.company_name}</strong>
                       </td>
+                      <td style={tdStyle}>{c.company_voen || "-"}</td>
                       <td style={tdStyle}>{c.counterparty}</td>
+                      <td style={tdStyle}>{c.counterparty_voen || "-"}</td>
+                      <td style={tdStyle}>{c.created_by_name || "-"}</td>
                       <td style={tdStyle}>
                         <span style={datePill}>{c.start_date}</span>
                       </td>
@@ -411,12 +724,16 @@ export default function DashboardPage() {
                         )}
                       </td>
                       <td style={tdStyle}>
-                        {c.file_url ? (
-                          <a href={c.file_url} target="_blank" style={pdfBtn}>
-                            PDFə bax
-                          </a>
+                        {c.file_url || c.generated_file_path ? (
+                          <button
+                            type="button"
+                            onClick={() => openContractFile(c)}
+                            style={pdfBtn}
+                          >
+                            {getFileLabel(c.generated_file_path || c.file_url)}
+                          </button>
                         ) : (
-                          <span style={noPdfBadge}>PDF yoxdur</span>
+                          <span style={noPdfBadge}>Fayl yoxdur</span>
                         )}
                       </td>
                     </tr>
@@ -497,9 +814,51 @@ export default function DashboardPage() {
           .dashboard-actions button {
             width: 100% !important;
           }
+
+          input[type="date"] {
+            min-height: 46px;
+          }
         }
       `}</style>
     </div>
+  );
+}
+
+type StatCardProps = {
+  icon: string;
+  label: string;
+  value: string | number;
+  hint: string;
+  active: boolean;
+  onClick: () => void;
+  iconStyle: CSSProperties;
+};
+
+function StatCard({
+  icon,
+  label,
+  value,
+  hint,
+  active,
+  onClick,
+  iconStyle,
+}: StatCardProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        ...statCardButton,
+        ...(active ? statCardButtonActive : {}),
+      }}
+    >
+      <div style={statTop}>
+        <span style={iconStyle}>{icon}</span>
+        <span style={statLabel}>{label}</span>
+      </div>
+      <strong style={statValue}>{value}</strong>
+      <span style={statHint}>{hint}</span>
+    </button>
   );
 }
 
@@ -639,7 +998,7 @@ const pdfExportBtnStyle: CSSProperties = {
 
 const statsGrid: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
   gap: 14,
   marginBottom: 20,
 };
@@ -650,6 +1009,20 @@ const statCard: CSSProperties = {
   boxShadow: "0 18px 45px rgba(15,23,42,0.08)",
   borderRadius: 22,
   padding: 18,
+};
+
+const statCardButton: CSSProperties = {
+  ...statCard,
+  width: "100%",
+  textAlign: "left",
+  cursor: "pointer",
+  transition: "0.2s",
+};
+
+const statCardButtonActive: CSSProperties = {
+  border: "1px solid rgba(37,99,235,0.45)",
+  boxShadow: "0 22px 52px rgba(37,99,235,0.18)",
+  transform: "translateY(-2px)",
 };
 
 const statTop: CSSProperties = {
@@ -707,10 +1080,20 @@ const statIconRed: CSSProperties = {
   background: "#fee2e2",
 };
 
+const statIconPurple: CSSProperties = {
+  ...statIconBlue,
+  background: "#ede9fe",
+};
+
+const statIconGray: CSSProperties = {
+  ...statIconBlue,
+  background: "#f1f5f9",
+};
+
 /* TOOLBAR */
 
 const toolbarCard: CSSProperties = {
-  // display: "flex",
+  display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
   gap: 18,
@@ -743,9 +1126,26 @@ const toolbarText: CSSProperties = {
   lineHeight: 1.5,
 };
 
+const toolbarRight: CSSProperties = {
+  display: "flex",
+  alignItems: "flex-end",
+  gap: 10,
+  flex: "1 1 520px",
+  flexWrap: "wrap",
+  minWidth: 0,
+};
+
+const searchAndDateWrap: CSSProperties = {
+  flex: "1 1 520px",
+  minWidth: 0,
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+};
+
 const searchWrap: CSSProperties = {
-  flex: "1 1 420px",
-  minWidth: 260,
+  width: "100%",
+  minWidth: 0,
   position: "relative",
 };
 
@@ -768,6 +1168,49 @@ const searchInputStyle: CSSProperties = {
   color: "#0f172a",
   fontSize: 14,
   outline: "none",
+};
+
+const dateFilterWrap: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 180px))",
+  alignItems: "end",
+  gap: 10,
+  width: "100%",
+  minWidth: 0,
+};
+
+const dateLabel: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 5,
+  color: "#475569",
+  fontSize: 12,
+  fontWeight: 900,
+  minWidth: 0,
+};
+
+const dateInputStyle: CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "12px 13px",
+  borderRadius: 15,
+  border: "1px solid #cbd5e1",
+  background: "#fff",
+  color: "#0f172a",
+  fontSize: 13,
+  outline: "none",
+};
+
+const clearSearchBtn: CSSProperties = {
+  border: "1px solid #cbd5e1",
+  background: "#fff",
+  color: "#334155",
+  padding: "13px 14px",
+  borderRadius: 15,
+  cursor: "pointer",
+  fontSize: 13,
+  fontWeight: 850,
+  whiteSpace: "nowrap",
 };
 
 /* COMPANY CARDS */
@@ -925,7 +1368,7 @@ const tableStyle: CSSProperties = {
   width: "100%",
   borderCollapse: "separate",
   borderSpacing: 0,
-  minWidth: 900,
+  minWidth: 1250,
   background: "#fff",
 };
 
@@ -1044,6 +1487,8 @@ const pdfBtn: CSSProperties = {
   textDecoration: "none",
   fontSize: 13,
   fontWeight: 900,
+  border: "none",
+  cursor: "pointer",
 };
 
 /* EMPTY */

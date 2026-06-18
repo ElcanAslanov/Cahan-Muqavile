@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 export default function CompaniesPage() {
   const [companies, setCompanies] = useState<any[]>([]);
   const [name, setName] = useState("");
+  const [voen, setVoen] = useState("");
 
   async function loadCompanies() {
     const { data, error } = await supabase
@@ -22,18 +23,24 @@ export default function CompaniesPage() {
   }
 
   async function addCompany() {
-    if (!name.trim()) return;
+    if (!name.trim() || !voen.trim()) {
+      alert("Şirkət adı və VÖEN mütləq doldurulmalıdır");
+      return;
+    }
 
     const { error } = await supabase.from("companies").insert({
-      name,
+      name: name.trim(),
+      voen: voen.trim(),
     });
 
     if (error) {
       console.error(error);
+      alert("Şirkət əlavə olunmadı");
       return;
     }
 
     setName("");
+    setVoen("");
     loadCompanies();
   }
 
@@ -57,7 +64,6 @@ export default function CompaniesPage() {
 
   return (
     <div className="admin-companies-page" style={pageStyle}>
-      {/* HERO */}
       <section className="companies-hero" style={heroCard}>
         <div style={heroGlowOne} />
         <div style={heroGlowTwo} />
@@ -87,7 +93,6 @@ export default function CompaniesPage() {
         </div>
       </section>
 
-      {/* STATS */}
       <section className="companies-stats" style={statsGrid}>
         <div style={statCard}>
           <div style={statTop}>
@@ -105,9 +110,11 @@ export default function CompaniesPage() {
             <span style={statLabel}>Yeni əlavə</span>
           </div>
 
-          <strong style={statValue}>{name.trim() ? "1" : "0"}</strong>
+          <strong style={statValue}>
+            {name.trim() && voen.trim() ? "1" : "0"}
+          </strong>
           <span style={statHint}>
-            Hazırda əlavə edilməyə hazır şirkət adı
+            Hazırda əlavə edilməyə hazır şirkət məlumatı
           </span>
         </div>
 
@@ -122,7 +129,6 @@ export default function CompaniesPage() {
         </div>
       </section>
 
-      {/* ADD COMPANY */}
       <section className="companies-add-card" style={addCard}>
         <div className="companies-add-info" style={addInfo}>
           <h2 className="companies-card-title" style={cardTitle}>
@@ -130,7 +136,7 @@ export default function CompaniesPage() {
           </h2>
 
           <p style={cardText}>
-            Şirkət adını daxil edin və sistemə əlavə edin.
+            Şirkət adını və VÖEN-ni daxil edin və sistemə əlavə edin.
           </p>
         </div>
 
@@ -142,6 +148,18 @@ export default function CompaniesPage() {
               placeholder="Şirkət adı"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              className="companies-input"
+              style={inputStyle}
+            />
+          </div>
+
+          <div className="companies-input-wrap" style={inputWrap}>
+            <span style={inputIcon}>#</span>
+
+            <input
+              placeholder="VÖEN"
+              value={voen}
+              onChange={(e) => setVoen(e.target.value)}
               className="companies-input"
               style={inputStyle}
             />
@@ -159,7 +177,6 @@ export default function CompaniesPage() {
         </div>
       </section>
 
-      {/* LIST */}
       <section className="companies-list-card" style={listCard}>
         <div className="companies-list-header" style={listHeader}>
           <div>
@@ -167,9 +184,7 @@ export default function CompaniesPage() {
               Şirkət siyahısı
             </h2>
 
-            <p style={cardText}>
-              Göstərilən nəticə: {companies.length}
-            </p>
+            <p style={cardText}>Göstərilən nəticə: {companies.length}</p>
           </div>
         </div>
 
@@ -197,7 +212,7 @@ export default function CompaniesPage() {
                     <div style={companyName}>{c.name}</div>
 
                     <div style={companyMeta}>
-                      Şirkət #{companies.length - index}
+                      VÖEN: {c.voen || "Yoxdur"} · Şirkət #{companies.length - index}
                     </div>
                   </div>
                 </div>
@@ -353,7 +368,6 @@ export default function CompaniesPage() {
             justify-content: center !important;
           }
         }
-          
 
         @media (max-width: 380px) {
           .companies-title {
@@ -385,8 +399,6 @@ const pageStyle: CSSProperties = {
     "radial-gradient(circle at top left, rgba(56,189,248,0.18), transparent 28%), radial-gradient(circle at top right, rgba(99,102,241,0.16), transparent 28%), linear-gradient(135deg, #f3f7fb 0%, #eaf2fb 48%, #f8fafc 100%)",
   color: "#0f172a",
 };
-
-/* HERO */
 
 const heroCard: CSSProperties = {
   position: "relative",
@@ -511,8 +523,6 @@ const heroMiniHint: CSSProperties = {
   lineHeight: 1.45,
 };
 
-/* STATS */
-
 const statsGrid: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
@@ -579,10 +589,7 @@ const statIconPurple: CSSProperties = {
   background: "#ede9fe",
 };
 
-/* ADD CARD */
-
 const addCard: CSSProperties = {
-  // display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
   gap: 18,
@@ -599,6 +606,7 @@ const addCard: CSSProperties = {
 const addInfo: CSSProperties = {
   minWidth: 240,
   flex: "1 1 320px",
+  marginBottom: 14,
 };
 
 const cardTitle: CSSProperties = {
@@ -680,8 +688,6 @@ const buttonIcon: CSSProperties = {
   fontSize: 18,
   lineHeight: 1,
 };
-
-/* LIST */
 
 const listCard: CSSProperties = {
   background: "rgba(255,255,255,0.92)",
@@ -773,8 +779,6 @@ const deleteButton: CSSProperties = {
   boxShadow: "0 10px 22px rgba(220,38,38,0.18)",
   whiteSpace: "nowrap",
 };
-
-/* EMPTY */
 
 const emptyBox: CSSProperties = {
   padding: "46px 20px",

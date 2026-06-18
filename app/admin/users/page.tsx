@@ -3,6 +3,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { supabase } from "@/lib/supabase";
 import { validatePassword } from "@/lib/password";
+import { createAuditLog } from "@/lib/auditlog";
 
 export default function UsersPage() {
   const [users, setUsers] = useState<any[]>([]);
@@ -19,6 +20,45 @@ export default function UsersPage() {
   const [newPassword, setNewPassword] = useState("");
   const [selectedUser, setSelectedUser] = useState<string>("");
 
+  function buildDefaultPermissions(companyRows = companies) {
+    return companyRows.map((c) => ({
+      company_id: c.id,
+      can_read: false,
+      can_create: false,
+      can_delete: false,
+      can_archive: false,
+      can_edit: false,
+    }));
+  }
+
+  function buildPermissionsFromExisting(existingPermissions: any[], companyRows = companies) {
+    return companyRows.map((company) => {
+      const existing = existingPermissions.find(
+        (permission) => permission.company_id === company.id
+      );
+
+      return {
+        company_id: company.id,
+        can_read: Boolean(existing?.can_read ?? existing?.can_view ?? false),
+        can_create: Boolean(existing?.can_create ?? false),
+        can_delete: Boolean(existing?.can_delete ?? false),
+        can_archive: Boolean(existing?.can_archive ?? false),
+        can_edit: Boolean(existing?.can_edit ?? false),
+      };
+    });
+  }
+
+  function normalizePermissionsForSave(permissionRows = permissions) {
+    return permissionRows.map((permission) => ({
+      company_id: permission.company_id,
+      can_read: Boolean(permission.can_read ?? permission.can_view ?? false),
+      can_create: Boolean(permission.can_create),
+      can_delete: Boolean(permission.can_delete),
+      can_archive: Boolean(permission.can_archive),
+      can_edit: Boolean(permission.can_edit),
+    }));
+  }
+
   async function loadUsers() {
     const { data } = await supabase
       .from("profiles")
@@ -34,15 +74,7 @@ export default function UsersPage() {
     if (data) {
       setCompanies(data);
 
-      const initial = data.map((c) => ({
-        company_id: c.id,
-        can_read: false,
-        can_create: false,
-        can_delete: false,
-        can_archive: false,
-        can_edit: false,
-      }));
-
+      const initial = buildDefaultPermissions(data);
       setPermissions(initial);
     }
   }
@@ -75,9 +107,34 @@ export default function UsersPage() {
   }
 
   function updatePermission(index: number, key: string, value: boolean) {
-    const updated = [...permissions];
-    updated[index][key] = value;
-    setPermissions(updated);
+    setPermissions((prev) => {
+      const updated = [...prev];
+
+      if (!updated[index]) {
+        const company = companies[index];
+        if (!company) return prev;
+
+        updated[index] = {
+          company_id: company.id,
+          can_read: false,
+          can_create: false,
+          can_delete: false,
+          can_archive: false,
+          can_edit: false,
+        };
+      }
+
+      updated[index] = {
+        ...updated[index],
+        [key]: value,
+      };
+
+      if (key === "can_view") {
+        updated[index].can_read = value;
+      }
+
+      return updated;
+    });
   }
 
   function applyHoldingDefaultPermissions() {
@@ -92,7 +149,7 @@ export default function UsersPage() {
   }
 
   async function addUser() {
-    let finalPermissions = permissions;
+    let finalPermissions = normalizePermissionsForSave();
 
     if (role === "HOLDING_MANAGER" && selectedCompanies.length === 0) {
       finalPermissions = applyHoldingDefaultPermissions();
@@ -133,7 +190,7 @@ export default function UsersPage() {
           role === "HOLDING_MANAGER"
             ? selectedCompanies
             : [],
-        permissions,
+        permissions: finalPermissions,
       }),
     });
 
@@ -143,6 +200,26 @@ export default function UsersPage() {
       alert(data.error || "User create error");
       return;
     }
+
+    await createAuditLog({
+      action: "CREATE_USER",
+      tableName: "profiles",
+      recordId: data?.user?.id || data?.id || null,
+      description: `Yeni istifadəçi yaradıldı: ${name} (${email})`,
+      oldData: null,
+      newData: {
+        full_name: name,
+        email,
+        role,
+        company_ids:
+          role === "COMPANY_MANAGER" ||
+          role === "ACCOUNTANT" ||
+          role === "HOLDING_MANAGER"
+            ? selectedCompanies
+            : [],
+        permissions: finalPermissions,
+      },
+    });
 
     alert("User created");
 
@@ -158,7 +235,33 @@ export default function UsersPage() {
   async function deleteUser(id: string) {
     if (!confirm("Delete user?")) return;
 
-    await supabase.from("profiles").delete().eq("id", id);
+    const oldUser = users.find((user) => user.id === id) || null;
+
+    const { data: oldPermissions } = await supabase
+      .from("user_company_permissions")
+      .select("*")
+      .eq("user_id", id);
+
+    const { error } = await supabase.from("profiles").delete().eq("id", id);
+
+    if (error) {
+      alert("User silinmədi");
+      console.error(error);
+      return;
+    }
+
+    await createAuditLog({
+      action: "DELETE_USER",
+      tableName: "profiles",
+      recordId: id,
+      description: `İstifadəçi silindi: ${oldUser?.full_name || oldUser?.email || id}`,
+      oldData: {
+        user: oldUser,
+        permissions: oldPermissions || [],
+      },
+      newData: null,
+    });
+
     loadUsers();
   }
 
@@ -181,6 +284,22 @@ export default function UsersPage() {
       return;
     }
 
+    const changedUser = users.find((user) => user.id === selectedUser);
+
+    await createAuditLog({
+      action: "CHANGE_USER_PASSWORD",
+      tableName: "profiles",
+      recordId: selectedUser,
+      description: `İstifadəçi parolu dəyişdirildi: ${
+        changedUser?.full_name || changedUser?.email || selectedUser
+      }`,
+      oldData: null,
+      newData: {
+        user_id: selectedUser,
+        password_changed: true,
+      },
+    });
+
     alert("Password updated");
     setNewPassword("");
     setSelectedUser("");
@@ -194,6 +313,15 @@ export default function UsersPage() {
   async function updateUser() {
     if (!editingUser) return;
 
+    const oldUser = users.find((user) => user.id === editingUser.id) || null;
+
+    const { data: oldPermissions } = await supabase
+      .from("user_company_permissions")
+      .select("*")
+      .eq("user_id", editingUser.id);
+
+    const permissionsToSave = normalizePermissionsForSave();
+
     const res = await fetch("/api/update-user", {
       method: "POST",
       headers: {
@@ -204,7 +332,7 @@ export default function UsersPage() {
         full_name: editingUser.full_name,
         role: editingUser.role,
         company_ids: selectedCompanies,
-        permissions,
+        permissions: permissionsToSave,
       }),
     });
 
@@ -215,14 +343,67 @@ export default function UsersPage() {
       return;
     }
 
+    await createAuditLog({
+      action: "UPDATE_USER",
+      tableName: "profiles",
+      recordId: editingUser.id,
+      description: `İstifadəçi məlumatları yeniləndi: ${
+        editingUser.full_name || editingUser.email || editingUser.id
+      }`,
+      oldData: {
+        user: oldUser,
+        permissions: oldPermissions || [],
+      },
+      newData: {
+        user: {
+          id: editingUser.id,
+          full_name: editingUser.full_name,
+          email: editingUser.email,
+          role: editingUser.role,
+        },
+        company_ids: selectedCompanies,
+        permissions: permissionsToSave,
+      },
+    });
+
     alert("User updated");
 
     setEditingUser(null);
     loadUsers();
   }
 
-  function openEditUser(user: any) {
+  async function openEditUser(user: any) {
     setEditingUser(user);
+
+    const { data: userPermissions, error } = await supabase
+      .from("user_company_permissions")
+      .select("*")
+      .eq("user_id", user.id);
+
+    if (error) {
+      console.error(error);
+      alert("İstifadəçi icazələri yüklənmədi");
+      setSelectedCompanies([]);
+      setPermissions(buildDefaultPermissions());
+      return;
+    }
+
+    const safePermissions = userPermissions || [];
+
+    const companyIds = safePermissions
+      .filter(
+        (permission) =>
+          permission.can_read ||
+          permission.can_view ||
+          permission.can_create ||
+          permission.can_delete ||
+          permission.can_archive ||
+          permission.can_edit
+      )
+      .map((permission) => permission.company_id);
+
+    setSelectedCompanies(companyIds);
+    setPermissions(buildPermissionsFromExisting(safePermissions));
   }
 
   return (
@@ -458,7 +639,10 @@ export default function UsersPage() {
                         <input
                           type="checkbox"
                           disabled={!selectedCompanies.includes(c.id)}
-                          checked={permissions[i].can_edit}
+                          checked={
+                            selectedCompanies.includes(c.id) &&
+                            !!permissions[i]?.can_edit
+                          }
                           onChange={(e) =>
                             updatePermission(i, "can_edit", e.target.checked)
                           }
@@ -661,10 +845,13 @@ export default function UsersPage() {
                       <td style={tdStyle}>
                         <input
                           type="checkbox"
-                          checked={!!permissions[i]?.can_view}
+                          checked={
+                            selectedCompanies.includes(c.id) &&
+                            !!permissions[i]?.can_read
+                          }
                           disabled={!selectedCompanies.includes(c.id)}
                           onChange={(e) =>
-                            updatePermission(i, "can_view", e.target.checked)
+                            updatePermission(i, "can_read", e.target.checked)
                           }
                         />
                       </td>
@@ -672,7 +859,10 @@ export default function UsersPage() {
                       <td style={tdStyle}>
                         <input
                           type="checkbox"
-                          checked={permissions[i].can_create}
+                          checked={
+                            selectedCompanies.includes(c.id) &&
+                            !!permissions[i]?.can_create
+                          }
                           disabled={!selectedCompanies.includes(c.id)}
                           onChange={(e) =>
                             updatePermission(i, "can_create", e.target.checked)
@@ -683,7 +873,10 @@ export default function UsersPage() {
                       <td style={tdStyle}>
                         <input
                           type="checkbox"
-                          checked={permissions[i].can_delete}
+                          checked={
+                            selectedCompanies.includes(c.id) &&
+                            !!permissions[i]?.can_delete
+                          }
                           disabled={!selectedCompanies.includes(c.id)}
                           onChange={(e) =>
                             updatePermission(i, "can_delete", e.target.checked)
@@ -694,7 +887,10 @@ export default function UsersPage() {
                       <td style={tdStyle}>
                         <input
                           type="checkbox"
-                          checked={permissions[i].can_archive}
+                          checked={
+                            selectedCompanies.includes(c.id) &&
+                            !!permissions[i]?.can_archive
+                          }
                           disabled={!selectedCompanies.includes(c.id)}
                           onChange={(e) =>
                             updatePermission(i, "can_archive", e.target.checked)
@@ -705,7 +901,10 @@ export default function UsersPage() {
                       <td style={tdStyle}>
                         <input
                           type="checkbox"
-                          checked={permissions[i].can_edit}
+                          checked={
+                            selectedCompanies.includes(c.id) &&
+                            !!permissions[i]?.can_edit
+                          }
                           disabled={!selectedCompanies.includes(c.id)}
                           onChange={(e) =>
                             updatePermission(i, "can_edit", e.target.checked)

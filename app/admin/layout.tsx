@@ -51,11 +51,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   function linkStyle(href: string): CSSProperties {
-    const active = pathname === href;
+    const active = pathname === href || pathname.startsWith(`${href}/`);
 
     return {
       display: "inline-flex",
       alignItems: "center",
+      justifyContent: "center",
       gap: 8,
       color: active ? "#fff" : "#cbd5e1",
       textDecoration: "none",
@@ -67,9 +68,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       border: active
         ? "1px solid rgba(255,255,255,0.22)"
         : "1px solid rgba(255,255,255,0.08)",
-      fontSize: 14,
+      fontSize: 13,
       fontWeight: 850,
       whiteSpace: "nowrap",
+      flexShrink: 0,
       boxShadow: active ? "0 12px 28px rgba(37,99,235,0.28)" : "none",
     };
   }
@@ -114,9 +116,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <span style={brandIcon}>🛡️</span>
 
               <span style={brandTextWrap}>
-                <span style={brandTitle}>Admin Panel</span>
+                <span className="brand-title" style={brandTitle}>Admin Panel</span>
 
-                <span style={brandSubtitle}>Müqavilə idarəetməsi</span>
+                <span className="brand-subtitle" style={brandSubtitle}>Müqavilə idarəetməsi</span>
               </span>
             </Link>
           </div>
@@ -133,12 +135,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               ⚙️ Müqavilə ayarları
             </Link>
 
+            <Link href="/admin/templates" style={linkStyle("/admin/templates")}>
+              🧩 Şablonlar
+            </Link>
+
             <Link href="/admin/users" style={linkStyle("/admin/users")}>
               👥 İstifadəçilər
             </Link>
 
             <Link href="/admin/companies" style={linkStyle("/admin/companies")}>
               🏢 Şirkətlər
+            </Link>
+
+            <Link href="/admin/audit-logs" style={linkStyle("/admin/audit-logs")}>
+              🧾 Loglar
             </Link>
           </div>
 
@@ -168,6 +178,22 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               </Link>
 
               <Link
+                href="/admin/contract-settings"
+                style={linkStyle("/admin/contract-settings")}
+                onClick={() => setMenuOpen(false)}
+              >
+                ⚙️ Müqavilə ayarları
+              </Link>
+
+              <Link
+                href="/admin/templates"
+                style={linkStyle("/admin/templates")}
+                onClick={() => setMenuOpen(false)}
+              >
+                🧩 Şablonlar
+              </Link>
+
+              <Link
                 href="/admin/users"
                 style={linkStyle("/admin/users")}
                 onClick={() => setMenuOpen(false)}
@@ -182,6 +208,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               >
                 🏢 Şirkətlər
               </Link>
+
+              <Link
+                href="/admin/audit-logs"
+                style={linkStyle("/admin/audit-logs")}
+                onClick={() => setMenuOpen(false)}
+              >
+                🧾 Loglar
+              </Link>
             </div>
           </div>
         )}
@@ -194,6 +228,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           display: none !important;
         }
 
+        .desktop-menu::-webkit-scrollbar {
+          display: none;
+        }
+
+        @media (max-width: 1180px) {
+          .desktop-menu {
+            justify-content: flex-start !important;
+          }
+        }
+
         @media (max-width: 980px) {
           .desktop-menu {
             display: none !important;
@@ -201,6 +245,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
           .hamburger {
             display: inline-flex !important;
+          }
+        }
+
+        @media (max-width: 720px) {
+          .mobile-menu-wrap a {
+            width: 100% !important;
+            justify-content: flex-start !important;
           }
         }
 
@@ -212,6 +263,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           .mobile-menu-wrap {
             padding-left: 12px !important;
             padding-right: 12px !important;
+          }
+
+          .mobile-menu-wrap > div {
+            grid-template-columns: 1fr !important;
+          }
+        }
+
+        @media (max-width: 420px) {
+          .brand-subtitle {
+            display: none !important;
+          }
+
+          .brand-title {
+            font-size: 14px !important;
           }
         }
 
@@ -247,13 +312,13 @@ const navStyle: CSSProperties = {
 
 const navInner: CSSProperties = {
   width: "100%",
-  maxWidth: 1280,
+  maxWidth: 1440,
   margin: "0 auto",
-  padding: "12px clamp(14px, 3vw, 28px)",
-  display: "flex",
+  padding: "12px clamp(14px, 2vw, 24px)",
+  display: "grid",
+  gridTemplateColumns: "auto minmax(0, 1fr) auto",
   alignItems: "center",
-  justifyContent: "space-between",
-  gap: 14,
+  gap: 12,
 };
 
 const brandArea: CSSProperties = {
@@ -323,9 +388,14 @@ const brandSubtitle: CSSProperties = {
 const desktopMenu: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  justifyContent: "center",
-  gap: 9,
+  justifyContent: "flex-start",
+  gap: 8,
   flex: 1,
+  minWidth: 0,
+  overflowX: "auto",
+  overflowY: "hidden",
+  WebkitOverflowScrolling: "touch",
+  scrollbarWidth: "none",
 };
 
 const logoutButton: CSSProperties = {
@@ -352,7 +422,7 @@ const mobileMenuWrap: CSSProperties = {
 
 const mobileMenu: CSSProperties = {
   width: "100%",
-  maxWidth: 1280,
+  maxWidth: 1440,
   margin: "0 auto",
   display: "flex",
   flexDirection: "column",
@@ -366,8 +436,9 @@ const mobileMenu: CSSProperties = {
 
 const mainStyle: CSSProperties = {
   width: "100%",
-  maxWidth: 1280,
+  maxWidth: 1440,
   margin: "0 auto",
+  padding: "0 clamp(12px, 2vw, 24px) 28px",
 };
 
 const loadingPage: CSSProperties = {
