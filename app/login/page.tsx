@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 
@@ -12,13 +12,27 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    router.prefetch("/admin/dashboard");
+    router.prefetch("/holding");
+    router.prefetch("/company");
+    router.prefetch("/accountant");
+  }, [router]);
+
   async function handleLogin(e?: FormEvent) {
     if (e) e.preventDefault();
+
+    const cleanEmail = email.trim();
+
+    if (!cleanEmail || !password) {
+      alert("Email və şifrə daxil edin");
+      return;
+    }
 
     setLoading(true);
 
     const { data, error } = await supabase.auth.signInWithPassword({
-      email,
+      email: cleanEmail,
       password,
     });
 
@@ -28,42 +42,43 @@ export default function LoginPage() {
       return;
     }
 
-    const user = data.user;
+    const userId = data.user?.id;
 
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", user.id)
-      .single();
-
-    if (!profile) {
-      alert("Profile not found");
+    if (!userId) {
+      alert("İstifadəçi tapılmadı");
       setLoading(false);
       return;
     }
 
-    // ✅ ROLE ROUTING
-    if (profile.role === "ADMIN") {
-      router.push("/admin/dashboard");
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (profileError || !profile?.role) {
+      alert("Profile tapılmadı");
+      setLoading(false);
       return;
     }
 
-    if (profile.role === "HOLDING_MANAGER") {
-      router.push("/holding");
+    const routes: Record<string, string> = {
+      ADMIN: "/admin/dashboard",
+      HOLDING_MANAGER: "/holding",
+      COMPANY_MANAGER: "/company",
+      ACCOUNTANT: "/accountant",
+    };
+
+    const nextPath = routes[profile.role];
+
+    if (!nextPath) {
+      alert("Bu rol üçün giriş səhifəsi təyin edilməyib");
+      setLoading(false);
       return;
     }
 
-    if (profile.role === "COMPANY_MANAGER") {
-      router.push("/company");
-      return;
-    }
-
-    if (profile.role === "ACCOUNTANT") {
-      router.push("/accountant");
-      return;
-    }
-
-    setLoading(false);
+    router.replace(nextPath);
+    router.refresh();
   }
 
   async function handleForgotPassword() {
@@ -187,6 +202,8 @@ export default function LoginPage() {
 
                       <input
                         type="email"
+                        required
+                        autoComplete="email"
                         placeholder="Email ünvanınızı daxil edin"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
@@ -207,6 +224,8 @@ export default function LoginPage() {
 
                       <input
                         type={showPassword ? "text" : "password"}
+                        required
+                        autoComplete="current-password"
                         placeholder="Şifrənizi daxil edin"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}

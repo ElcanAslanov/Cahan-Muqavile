@@ -5,6 +5,53 @@ import { supabase } from "@/lib/supabase";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 
+const ADMIN_ROLE_CACHE_KEY = "cahan_admin_role_cache";
+
+type AdminRoleCache = {
+  userId: string;
+  role: string;
+  savedAt: number;
+};
+
+function getCachedAdminRole(): AdminRoleCache | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(ADMIN_ROLE_CACHE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as AdminRoleCache;
+    const isFresh = Date.now() - parsed.savedAt < 1000 * 60 * 30;
+
+    if (!isFresh) {
+      window.sessionStorage.removeItem(ADMIN_ROLE_CACHE_KEY);
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function setCachedAdminRole(userId: string, role: string) {
+  if (typeof window === "undefined") return;
+
+  window.sessionStorage.setItem(
+    ADMIN_ROLE_CACHE_KEY,
+    JSON.stringify({
+      userId,
+      role,
+      savedAt: Date.now(),
+    })
+  );
+}
+
+function clearCachedAdminRole() {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.removeItem(ADMIN_ROLE_CACHE_KEY);
+}
+
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -13,39 +60,60 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
+    router.prefetch("/admin/dashboard");
+    router.prefetch("/admin/contracts");
+    router.prefetch("/admin/users");
+    router.prefetch("/admin/companies");
+
+    const cached = getCachedAdminRole();
+
+    if (cached?.role === "ADMIN") {
+      setLoading(false);
+    }
+
     checkUser();
-  }, []);
+  }, [router]);
 
   async function checkUser() {
     const { data } = await supabase.auth.getSession();
 
     if (!data.session) {
+      clearCachedAdminRole();
       router.replace("/login");
       return;
     }
 
     const userId = data.session.user.id;
+    const cached = getCachedAdminRole();
 
-    const { data: profile } = await supabase
+    if (cached?.userId === userId && cached.role === "ADMIN") {
+      setLoading(false);
+    }
+
+    const { data: profile, error } = await supabase
       .from("profiles")
       .select("role")
       .eq("id", userId)
-      .single();
+      .maybeSingle();
 
-    if (!profile) {
+    if (error || !profile) {
+      clearCachedAdminRole();
       router.replace("/login");
       return;
     }
 
     if (profile.role !== "ADMIN") {
+      clearCachedAdminRole();
       router.replace("/login");
       return;
     }
 
+    setCachedAdminRole(userId, profile.role);
     setLoading(false);
   }
 
   async function logout() {
+    clearCachedAdminRole();
     await supabase.auth.signOut();
     router.push("/login");
   }
